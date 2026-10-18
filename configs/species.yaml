@@ -1,0 +1,127 @@
+# Species presets for synthtree.tree.generate_tree (merged over tree.DEFAULT_PRESET).
+# Leaf types: broad | small | compound | needle.  Densities: sparse | medium | dense.
+# Heights are metres above the soil; match them to your real potted saplings.
+
+broad_sparse:
+  description: broad-leaved sapling (ficus/maple-like), sparse canopy
+  height_m: [0.8, 1.0]
+  trunk: {radius_base: 0.010, radius_tip: 0.0015, segments: 12, wander_deg: 6}
+  levels:
+    - {count: 6, start_frac: 0.4, end_frac: 0.92, down_angle_deg: [45, 65], length_ratio: 0.42,
+       length_shape: spherical, radius_ratio: 0.55, radius_tip: 0.0012, seg_len_m: 0.04, sides: 6}
+    - {count_per_m: 8, start_frac: 0.25, end_frac: 0.9, down_angle_deg: [35, 55], length_ratio: 0.35,
+       radius_ratio: 0.6, radius_tip: 0.0008, seg_len_m: 0.03, sides: 4}
+  leaves: {type: broad, shape: ovate, length_m: [0.07, 0.10], width_ratio: 0.6, levels: [1, 2],
+           spacing_m: 0.025, per_site: 1.0, max_leaves: 500}
+
+broad_medium:
+  description: broad-leaved sapling, medium canopy
+  height_m: [1.1, 1.4]
+  trunk: {radius_base: 0.012, segments: 14}
+  levels:
+    - {count: 10, start_frac: 0.35, end_frac: 0.95, down_angle_deg: [40, 65], length_ratio: 0.45,
+       length_shape: spherical, radius_ratio: 0.55, radius_tip: 0.0012, seg_len_m: 0.04, sides: 6}
+    - {count_per_m: 12, start_frac: 0.2, end_frac: 0.95, down_angle_deg: [35, 55], length_ratio: 0.35,
+       radius_ratio: 0.6, radius_tip: 0.0008, seg_len_m: 0.03, sides: 4}
+  leaves: {type: broad, shape: ovate, length_m: [0.06, 0.09], width_ratio: 0.58, levels: [1, 2],
+           spacing_m: 0.018, per_site: 1.2, max_leaves: 1500}
+
+broad_dense:
+  description: broad-leaved sapling, dense canopy
+  height_m: [1.4, 1.8]
+  pot: {radius_top: 0.15, radius_bottom: 0.11, height: 0.22}
+  trunk: {radius_base: 0.015, segments: 16}
+  levels:
+    - {count: 14, start_frac: 0.3, end_frac: 0.96, down_angle_deg: [40, 65], length_ratio: 0.45,
+       length_shape: spherical, radius_ratio: 0.55, radius_tip: 0.0012, seg_len_m: 0.04, sides: 6}
+    - {count_per_m: 16, start_frac: 0.15, end_frac: 0.95, down_angle_deg: [35, 60], length_ratio: 0.38,
+       radius_ratio: 0.6, radius_tip: 0.0008, seg_len_m: 0.03, sides: 4}
+  leaves: {type: broad, shape: obovate, length_m: [0.05, 0.08], width_ratio: 0.55, levels: [1, 2],
+           spacing_m: 0.012, per_site: 1.4, max_leaves: 3500}
+
+small_sparse:
+  description: small-leaved sapling (birch/myrtle-like), sparse
+  height_m: [0.6, 0.9]
+  trunk: {radius_base: 0.008, segments: 12, wander_deg: 7}
+  levels:
+    - {count: 8, start_frac: 0.3, end_frac: 0.95, down_angle_deg: [35, 60], length_ratio: 0.5,
+       length_shape: flame, radius_ratio: 0.5, radius_tip: 0.001, seg_len_m: 0.03, sides: 5}
+    - {count_per_m: 14, start_frac: 0.2, end_frac: 0.95, down_angle_deg: [30, 55], length_ratio: 0.35,
+       radius_ratio: 0.6, radius_tip: 0.0006, seg_len_m: 0.025, sides: 4}
+  leaves: {type: small, shape: elliptic, length_m: [0.018, 0.028], width_ratio: 0.55, levels: [1, 2],
+           spacing_m: 0.01, per_site: 1.5, segments: 4, curl: 0.04, max_leaves: 1500}
+
+small_dense:
+  description: small-leaved sapling (boxwood-like), dense
+  height_m: [0.5, 0.7]
+  pot: {radius_top: 0.11, radius_bottom: 0.08, height: 0.15}
+  trunk: {radius_base: 0.009, segments: 10}
+  levels:
+    - {count: 12, start_frac: 0.2, end_frac: 0.95, down_angle_deg: [30, 60], length_ratio: 0.55,
+       length_shape: spherical, radius_ratio: 0.5, radius_tip: 0.001, seg_len_m: 0.025, sides: 5}
+    - {count_per_m: 24, start_frac: 0.15, end_frac: 0.95, down_angle_deg: [30, 55], length_ratio: 0.35,
+       radius_ratio: 0.6, radius_tip: 0.0006, seg_len_m: 0.02, sides: 4}
+  leaves: {type: small, shape: elliptic, length_m: [0.012, 0.02], width_ratio: 0.6, levels: [1, 2],
+           spacing_m: 0.006, per_site: 1.6, segments: 4, curl: 0.05, max_leaves: 5000}
+
+compound_medium:
+  description: pinnate compound leaves (ash/rowan-like), medium
+  height_m: [1.0, 1.4]
+  trunk: {radius_base: 0.011, segments: 14}
+  levels:
+    - {count: 8, start_frac: 0.35, end_frac: 0.95, down_angle_deg: [40, 60], length_ratio: 0.45,
+       radius_ratio: 0.55, radius_tip: 0.0015, seg_len_m: 0.05, sides: 6}
+  leaves: {type: compound, shape: elliptic, length_m: [0.12, 0.18], width_ratio: 0.45, levels: [0, 1],
+           start_frac: 0.35, spacing_m: 0.06, per_site: 1.0, leaflet_pairs: 3, leaflet_frac: 0.28, petiole_frac: 0.15,
+           petiole_angle_deg: [35, 60], up_bias: 0.4, max_leaves: 400}
+
+compound_dense:
+  description: pinnate compound leaves, dense
+  height_m: [1.3, 1.7]
+  trunk: {radius_base: 0.013, segments: 16}
+  levels:
+    - {count: 12, start_frac: 0.3, end_frac: 0.95, down_angle_deg: [40, 65], length_ratio: 0.45,
+       radius_ratio: 0.55, radius_tip: 0.0012, seg_len_m: 0.04, sides: 6}
+    - {count_per_m: 6, start_frac: 0.3, end_frac: 0.9, down_angle_deg: [35, 55], length_ratio: 0.4,
+       radius_ratio: 0.6, radius_tip: 0.001, seg_len_m: 0.04, sides: 4}
+  leaves: {type: compound, shape: elliptic, length_m: [0.10, 0.15], width_ratio: 0.45, levels: [1, 2],
+           start_frac: 0.25, spacing_m: 0.05, per_site: 1.0, leaflet_pairs: 4, leaflet_frac: 0.22, petiole_frac: 0.12,
+           petiole_angle_deg: [35, 60], up_bias: 0.4, max_leaves: 900}
+
+needle_sparse:
+  description: conifer sapling (pine-like), sparse whorls
+  height_m: [0.7, 1.0]
+  trunk: {radius_base: 0.010, segments: 14, wander_deg: 2, upturn: 0.5}
+  levels:
+    - {count: 15, whorl: 5, start_frac: 0.3, end_frac: 0.9, down_angle_deg: [60, 80], length_ratio: 0.38,
+       length_shape: conical, radius_ratio: 0.5, radius_tip: 0.0015, seg_len_m: 0.03, upturn: 0.25, sides: 5}
+  leaves: {type: needle, length_m: [0.035, 0.05], width_ratio: 0.03, levels: [0, 1], start_frac: 0.15,
+           spacing_m: 0.004, per_site: 2.0, petiole_angle_deg: [30, 55], up_bias: 0.15, roll_deg: 0, segments: 3, max_leaves: 3500}
+  color: {front_rgb: [0.04, 0.12, 0.03], back_tint: [1.15, 1.15, 1.1]}
+
+needle_dense:
+  description: conifer sapling (spruce-like), dense
+  height_m: [0.9, 1.2]
+  pot: {radius_top: 0.13, radius_bottom: 0.10, height: 0.2}
+  trunk: {radius_base: 0.012, segments: 18, wander_deg: 1.5, upturn: 0.6}
+  levels:
+    - {count: 28, whorl: 4, start_frac: 0.15, end_frac: 0.92, down_angle_deg: [70, 88], length_ratio: 0.42,
+       length_shape: conical, radius_ratio: 0.45, radius_tip: 0.0012, seg_len_m: 0.025, upturn: 0.15, sides: 5}
+    - {count_per_m: 14, start_frac: 0.2, end_frac: 0.85, down_angle_deg: [50, 70], length_ratio: 0.35,
+       radius_ratio: 0.6, radius_tip: 0.0008, seg_len_m: 0.02, sides: 4}
+  leaves: {type: needle, length_m: [0.015, 0.022], width_ratio: 0.06, levels: [0, 1, 2], start_frac: 0.1,
+           spacing_m: 0.003, per_site: 2.0, petiole_angle_deg: [35, 60], up_bias: 0.1, roll_deg: 0, segments: 3, max_leaves: 9000}
+  color: {front_rgb: [0.03, 0.09, 0.03], back_tint: [1.2, 1.25, 1.2]}
+
+broad_medium_autumn:
+  description: broad-leaved sapling with autumn colours (tests vegetation masks)
+  height_m: [1.0, 1.3]
+  trunk: {radius_base: 0.012, segments: 14}
+  levels:
+    - {count: 9, start_frac: 0.35, end_frac: 0.95, down_angle_deg: [40, 65], length_ratio: 0.45,
+       length_shape: spherical, radius_ratio: 0.55, radius_tip: 0.0012, seg_len_m: 0.04, sides: 6}
+    - {count_per_m: 12, start_frac: 0.2, end_frac: 0.95, down_angle_deg: [35, 55], length_ratio: 0.35,
+       radius_ratio: 0.6, radius_tip: 0.0008, seg_len_m: 0.03, sides: 4}
+  leaves: {type: broad, shape: ovate, length_m: [0.06, 0.09], width_ratio: 0.6, levels: [1, 2],
+           spacing_m: 0.018, per_site: 1.2, max_leaves: 1200}
+  color: {autumn: true}

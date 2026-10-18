@@ -1,0 +1,88 @@
+# Master config: lists every sequence to generate.
+# Sequences = trees x wind levels (+ optional static ring). Calm and windy sequences of
+# a tree share the tree seed => identical geometry, identical camera path, identical
+# wind phases; only U differs.
+dataset_name: synthtree-v1
+output_root: ../data/output        # relative to this file
+sensor: sensor_d435i.yaml
+species: species.yaml
+
+capture:
+  fps: 30
+  duration_s: 20.0                 # >>> match your real orbit duration
+  frame_stride: 4                  # render every 4th video frame => 150 frames / sequence
+  orbit:
+    radius_m: auto                 # >>> or your real orbit radius in metres
+    heights_m: auto                # >>> or e.g. [0.9] / [0.7, 1.2] (one per loop)
+    loops: 1
+    start_angle_deg: 0
+    look_at_z: auto
+  jitter: {enabled: true, translation_m: 0.01, rotation_deg: 0.6, freq_hz: [0.1, 1.2], n_components: 4}
+  ring: {enabled: false, views_per_ring: 24, heights_m: auto, time_s: mid}
+
+wind:
+  levels: {calm: 0.0, low: 1.5, medium: 3.0, high: 5.0}   # >>> m/s measured at the canopy
+  direction_deg: 0.0
+  gust: {intensity: 0.35, freq_hz: [0.05, 0.6], n_components: 5}
+  branch:
+    law: {exponent: 2.0, u_ref: 5.0, saturation: null}
+    static_deg: 6.0
+    osc_deg: 3.0
+    cross_deg: 1.5
+    freq_hz: [0.6, 2.0]
+  leaf:
+    law: {exponent: 1.0, u_ref: 5.0, saturation: 1.5}
+    pitch_deg: 25.0
+    twist_deg: 18.0
+    mean_deg: 15.0
+    freq_hz: [2.5, 9.0]
+
+render:
+  resolution_scale: 1.0            # 1.0 = sensor resolution
+  beauty_engine: eevee             # eevee | cycles
+  device: auto                     # auto | gpu | cpu  (Cycles)
+  eevee: {samples: 32, raytracing: false}
+  cycles: {samples: 64, denoise: true, max_bounces: 6}
+  data_pass: {enabled: true}       # Cycles 1 spp, no AA: exact depth/normal/ids/flow
+  motion_blur: {enabled: false, shutter_frames: 0.5, subframes: 5}
+  rolling_shutter: {enabled: false, readout_s: 0.02, bands: 8}
+  background: {type: plain, color: [0.55, 0.6, 0.65], strength: 1.0, hdri_path: null}  # plain | hdri | room
+  sun: {elevation_deg: 50, azimuth_deg: 30, strength: 3.0, angle_deg: 3.0}
+  exposure: 0.0
+  save_blend: false
+
+outputs:
+  depth_exr_every: 10              # float32 EXR depth on every k-th frame (16-bit mm PNG on all)
+  normals_every: 1
+  flow: true
+  canonical_xyz_every: 0           # per-pixel canonical (rest-pose) coordinates, 0 = off
+  png_compression: 3
+  keep_raw: false                  # keep Blender's raw EXRs after post-processing
+
+noise:
+  profile: null                    # path to calibrated profile JSON; null = built-in D435-like defaults
+  seed_offset: 7
+
+splits:
+  holdout_every: 8                 # every 8th frame is a held-out test view
+  heldout_trees: [8, 9]
+
+trees:
+  - {id: 0, preset: broad_sparse, seed: 1000}
+  - {id: 1, preset: broad_medium, seed: 1001}
+  - {id: 2, preset: broad_dense, seed: 1002}
+  - {id: 3, preset: small_sparse, seed: 1003}
+  - {id: 4, preset: small_dense, seed: 1004}
+  - {id: 5, preset: compound_medium, seed: 1005}
+  - {id: 6, preset: compound_dense, seed: 1006}
+  - {id: 7, preset: needle_sparse, seed: 1007}
+  - {id: 8, preset: needle_dense, seed: 1008}
+  - {id: 9, preset: broad_medium_autumn, seed: 1009}
+
+# Applied on top when the batch runner is called with --smoke
+smoke:
+  output_root: ../data/smoke
+  capture: {duration_s: 2.0, frame_stride: 10}
+  render: {resolution_scale: 0.5, eevee: {samples: 8}, cycles: {samples: 16}}
+  only_trees: [1, 7]
+  only_levels: [calm, high]

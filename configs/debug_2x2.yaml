@@ -1,0 +1,7 @@
+# Start-small plan: 2 trees x 2 wind levels x 60 frames, full resolution.
+# Inherits everything from master.yaml via the `extends` key (handled by run_batch.py).
+extends: master.yaml
+output_root: ../data/debug
+capture: {duration_s: 8.0, frame_stride: 4}   # 60 frames
+only_trees: [1, 7]
+only_levels: [calm, high]

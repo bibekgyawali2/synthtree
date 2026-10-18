@@ -1,0 +1,7 @@
+numpy>=1.24
+pyyaml>=6
+OpenEXR>=3.3
+opencv-python-headless>=4.8
+scipy>=1.10
+matplotlib>=3.7
+pytest>=7

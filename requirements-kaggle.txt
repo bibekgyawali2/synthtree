@@ -1,0 +1,4 @@
+# Kaggle: numpy, opencv, scipy, torch are preinstalled
+nerfstudio==1.1.5   # splatfacto / depth-nerfacto (verify the current version)
+OpenEXR>=3.3        # only to read depth_exr/
+lpips               # optional, for masked LPIPS

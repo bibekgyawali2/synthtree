@@ -1,0 +1,24 @@
+# Real sensor to match.  >>> FILL IN with your calibration <<<
+# Get exact intrinsics for the stream you record with:
+#   rs-enumerate-devices -c        (RealSense)   or your own checkerboard calibration.
+# Values below are typical Intel RealSense D435i COLOUR-stream intrinsics at 848x480
+# (hFOV ~70 deg). Depth is assumed "aligned to colour" (rs2::align), so depth uses the
+# colour intrinsics and is pixel-aligned with RGB, exactly like the synthetic data.
+name: realsense_d435i
+rgb:
+  width: 848
+  height: 480
+  fx: 603.0
+  fy: 603.0
+  cx: 423.5
+  cy: 239.5
+  # alternatively give hfov_deg (and optional vfov_deg) instead of fx/fy/cx/cy
+depth:
+  units_m: 0.001          # 16-bit PNG in millimetres
+  min_m: 0.2
+  max_m: 4.0
+  aligned_to_rgb: true
+  # Native depth sampling relative to the colour grid after alignment
+  # (D435 depth hFOV ~87 deg at 848 px vs colour ~70 deg => ~0.74). Used by noise_sim.
+  effective_scale: 0.74
+fps: 30
