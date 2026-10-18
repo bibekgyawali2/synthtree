@@ -5,3 +5,4 @@ data/
 logs/
 .pytest_cache/
 *.blend1
+.venv-kaggle/
