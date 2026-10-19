@@ -57,7 +57,9 @@ def sample_mesh(V, F, n, rng, face_attr=None):
     return P, N, fi, area.sum()
 
 
-def load_recon(path, kind, opacity_min, rng, n_mesh=400_000, gaussian_mode="samples", n_samples=400_000):
+def load_recon(path, kind, opacity_min, rng, n_mesh=400_000, gaussian_mode="samples", n_samples=400_000, bbox=None):
+    """bbox: optional (lo, hi) world box; Gaussians centred outside it are dropped BEFORE footprint
+    sampling (otherwise huge background splats - floor, walls - absorb the sample budget)."""
     ply = read_ply(path)
     v = ply["vertex"]
     names = v.dtype.names
@@ -68,6 +70,8 @@ def load_recon(path, kind, opacity_min, rng, n_mesh=400_000, gaussian_mode="samp
     if kind == "gaussians":
         op = 1 / (1 + np.exp(-v["opacity"].astype(np.float64)))
         keep = op >= opacity_min
+        if bbox is not None:
+            keep &= np.all((P > bbox[0]) & (P < bbox[1]), axis=1)
         sc = np.stack([v[f"scale_{i}"] for i in range(3)], 1)[keep]
         q = np.stack([v[f"rot_{i}"] for i in range(4)], 1)[keep].astype(np.float64)  # w, x, y, z
         q /= np.linalg.norm(q, axis=1, keepdims=True)
@@ -85,14 +89,16 @@ def load_recon(path, kind, opacity_min, rng, n_mesh=400_000, gaussian_mode="samp
     return P, N, kind
 
 
-def sample_gaussians(mu, R, S, opacity, n, rng, clip=2.0):
+def sample_gaussians(mu, R, S, opacity, n, rng, clip=2.0, max_sigma=0.015):
     """Surface samples spread over each Gaussian's footprint (flattened onto its two largest axes).
 
     Centres alone under-cover the surface: a Gaussian is a blob, and ~1 cm centre spacing
     leaves most leaf surface > 5 mm from any centre even when the blobs fully cover it.
     Samples per Gaussian ~ opacity x footprint area; offsets ~ N(0, s) clipped to +-2 s.
-    Normals = the Gaussian's smallest axis.
+    Normals = the Gaussian's smallest axis. In-plane sigmas are capped at max_sigma (1.5 cm,
+    i.e. footprints <= +-3 cm) so a few oversized blurry blobs cannot spray points over the canopy.
     """
+    S = np.minimum(S, max_sigma)
     order = np.argsort(S, axis=1)  # smallest axis first
     idx = np.arange(len(S))
     a1, a2, a0 = order[:, 2], order[:, 1], order[:, 0]
@@ -236,17 +242,31 @@ def main():
                     help="samples: points spread over each Gaussian footprint (default); centers: Gaussian means only")
     ap.add_argument("--samples", type=int, default=600_000)
     ap.add_argument("--gate", type=float, default=0.03, help="floater distance gate (m)")
+    ap.add_argument("--crop", type=float, default=0.3, help="margin around the tree bbox (m)")
     ap.add_argument("--tau", type=float, default=0.005)
     ap.add_argument("--dataparser-transforms")
     ap.add_argument("--out")
     a = ap.parse_args()
     tree = load_tree(os.path.join(a.tree_dir, "canonical", "canonical_tree.npz"))
     rng = np.random.default_rng(0)
-    P, N, kind = load_recon(a.recon, a.kind, a.opacity_min, rng, gaussian_mode=a.gaussian_mode, n_samples=a.samples)
+    pts = np.concatenate([tree["leaf_verts"], tree["wood_verts"], tree["pot_verts"]])
+    bbox = (pts.min(0) - a.crop, pts.max(0) + a.crop)
+    if a.dataparser_transforms:  # bbox must be in the recon's frame; crop after mapping instead
+        bbox = None
+    P, N, kind = load_recon(a.recon, a.kind, a.opacity_min, rng, gaussian_mode=a.gaussian_mode, n_samples=a.samples, bbox=bbox)
     if a.dataparser_transforms:
         P, N = apply_dataparser_inverse(P, N, a.dataparser_transforms)
-    m = evaluate(P, N, tree, tau=a.tau, gate=a.gate)
+    m = evaluate(P, N, tree, tau=a.tau, gate=a.gate, crop=a.crop)
     m["recon_kind"] = kind + (f" ({a.gaussian_mode})" if kind == "gaussians" else "")
+    if kind == "gaussians":  # diagnostics: how many splats are near the tree and how big they are
+        v = read_ply(a.recon)["vertex"]
+        c = ply_xyz(v)
+        op = 1 / (1 + np.exp(-v["opacity"].astype(np.float64)))
+        smax = np.exp(np.max(np.stack([v[f"scale_{i}"] for i in range(3)], 1), axis=1))
+        near = np.all((c > bbox[0]) & (c < bbox[1]), axis=1) if bbox is not None else np.ones(len(c), bool)
+        m["gaussians_total"], m["gaussians_near_tree"] = int(len(c)), int(near.sum())
+        m["gaussians_near_tree_opacity_ge_min"] = int((near & (op >= a.opacity_min)).sum())
+        m["near_tree_max_scale_mm_p50_p90"] = [float(np.percentile(smax[near], 50) * 1000), float(np.percentile(smax[near], 90) * 1000)] if near.any() else None
     print(json.dumps(m, indent=1))
     if a.out:
         json.dump(m, open(a.out, "w"), indent=1)

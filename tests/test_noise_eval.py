@@ -164,10 +164,37 @@ def _fake_splat(tree, rng, density=7200.0, n_floor=4000, n_float=300, s_in=0.006
     return mu, R, S, np.full(len(mu), 0.9), P
 
 
-def test_geometry_floor_and_gaussian_footprints(small_tree):
-    from eval_geometry import evaluate, sample_gaussians
+def test_geometry_floor_and_gaussian_footprints(small_tree, tmp_path):
+    from eval_geometry import evaluate, load_recon, sample_gaussians
     rng = np.random.default_rng(1)
     mu, R, S, op, _ = _fake_splat(small_tree, rng)
+    # huge background splats (floor/walls far away) must not swallow the sample budget
+    nb = 3000
+    big_mu = np.stack([rng.uniform(-5, 5, nb), rng.uniform(-5, 5, nb), rng.uniform(0, 3, nb)], 1)
+    big_mu = big_mu[np.linalg.norm(big_mu[:, :2], axis=1) > 2.5]
+    allmu = np.concatenate([mu, big_mu])
+    allR = np.concatenate([R, np.tile(np.eye(3), (len(big_mu), 1, 1))])
+    allS = np.concatenate([S, np.tile([0.5, 0.5, 0.01], (len(big_mu), 1))])
+    allop = np.concatenate([op, np.full(len(big_mu), 0.9)])
+    rec = np.zeros(len(allmu), dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("opacity", "<f4")] +
+                   [(f"scale_{i}", "<f4") for i in range(3)] + [(f"rot_{i}", "<f4") for i in range(4)])
+    rec["x"], rec["y"], rec["z"] = allmu.T
+    rec["opacity"] = np.log(allop / (1 - allop))
+    for i in range(3):
+        rec[f"scale_{i}"] = np.log(np.maximum(allS[:, i], 1e-6))
+    from scipy.spatial.transform import Rotation
+    q = Rotation.from_matrix(allR).as_quat()  # x, y, z, w
+    rec["rot_0"], rec["rot_1"], rec["rot_2"], rec["rot_3"] = q[:, 3], q[:, 0], q[:, 1], q[:, 2]
+    with open(tmp_path / "scene.ply", "wb") as f:
+        hdr = ["ply", "format binary_little_endian 1.0", f"element vertex {len(rec)}"] + \
+              [f"property float {k}" for k in rec.dtype.names] + ["end_header"]
+        f.write(("\n".join(hdr) + "\n").encode())
+        f.write(rec.tobytes())
+    pts = np.concatenate([small_tree["leaf_verts"], small_tree["wood_verts"], small_tree["pot_verts"]])
+    bbox = (pts.min(0) - 0.3, pts.max(0) + 0.3)
+    Pf, Nf, _ = load_recon(str(tmp_path / "scene.ply"), "auto", 0.1, rng, gaussian_mode="samples", n_samples=300_000, bbox=bbox)
+    full = evaluate(Pf, Nf, small_tree, tau=0.005, n_gt=100_000)
+    assert full["recall"] > 0.9 and full["floater_frac"] < 0.1, full
     centers = evaluate(mu, R[:, :, 2], small_tree, tau=0.005, n_gt=100_000)
     Ps, Ns = sample_gaussians(mu, R, S, op, 300_000, rng)
     samples = evaluate(Ps, Ns, small_tree, tau=0.005, n_gt=100_000)
