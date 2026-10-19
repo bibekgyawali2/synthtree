@@ -195,6 +195,11 @@ def test_geometry_floor_and_gaussian_footprints(small_tree, tmp_path):
     Pf, Nf, _ = load_recon(str(tmp_path / "scene.ply"), "auto", 0.1, rng, gaussian_mode="samples", n_samples=300_000, bbox=bbox)
     full = evaluate(Pf, Nf, small_tree, tau=0.005, n_gt=100_000)
     assert full["recall"] > 0.9 and full["floater_frac"] < 0.1, full
+    from eval_geometry import hybrid_metrics
+    Pc, Nc, _ = load_recon(str(tmp_path / "scene.ply"), "auto", 0.1, rng, gaussian_mode="centers", bbox=bbox)
+    h = hybrid_metrics(evaluate(Pc, Nc, small_tree, tau=0.005, n_gt=100_000), full)
+    assert h["precision"] == h["raw"]["centers"]["precision"] and h["recall"] == full["recall"]
+    assert h["fscore"] > 0.5 and h["leaf_area_rel_error"] < 0.1
     centers = evaluate(mu, R[:, :, 2], small_tree, tau=0.005, n_gt=100_000)
     Ps, Ns = sample_gaussians(mu, R, S, op, 300_000, rng)
     samples = evaluate(Ps, Ns, small_tree, tau=0.005, n_gt=100_000)

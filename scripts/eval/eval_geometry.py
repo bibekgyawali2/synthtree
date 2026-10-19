@@ -232,14 +232,36 @@ def evaluate(recon_P, recon_N, tree, tau=0.005, n_gt=300_000, crop=0.3, min_pts=
     return out
 
 
+CENTER_KEYS = ("n_recon_points_near_tree", "floater_frac", "floor_frac", "accuracy_mm_median", "accuracy_mm",
+               "precision", "leaf_angle_w1_deg", "leaf_angle_kl", "leaf_angle_mean_gt_deg", "leaf_angle_mean_recon_deg",
+               "centroid_err_mm_median", "centroid_err_mm_p90")
+SAMPLE_KEYS = ("n_leaf_attributed", "completeness_mm_median", "completeness_mm", "recall", "leaf_area_gt_m2",
+               "leaf_area_recovered_m2", "leaf_area_rel_error", "leaf_area_per_leaf_mae_rel", "leaf_coverage")
+
+
+def hybrid_metrics(centers, samples):
+    """Each Gaussian counts once for 'is it on a leaf?' (centres); surface coverage uses footprints (samples).
+    Area-weighted samples over-count large blurry floaters for precision, and centres alone under-count
+    coverage, so each side of the chamfer/F-score comes from the representation that measures it."""
+    m = {"tau_m": centers["tau_m"], "gate_m": centers["gate_m"]}
+    m.update({k: centers.get(k) for k in CENTER_KEYS})
+    m.update({k: samples.get(k) for k in SAMPLE_KEYS})
+    p, r = m["precision"], m["recall"]
+    m["fscore"] = 2 * p * r / max(p + r, 1e-12)
+    m["chamfer_mm"] = 0.5 * (m["accuracy_mm"] + m["completeness_mm"]) if m["accuracy_mm"] is not None else None
+    m["raw"] = {"centers": centers, "samples": samples}
+    return m
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--recon", required=True)
     ap.add_argument("--tree-dir", required=True, help="trees/tree_XX (contains canonical/)")
     ap.add_argument("--kind", default="auto", choices=["auto", "gaussians", "mesh", "points"])
     ap.add_argument("--opacity-min", type=float, default=0.1)
-    ap.add_argument("--gaussian-mode", default="samples", choices=["samples", "centers"],
-                    help="samples: points spread over each Gaussian footprint (default); centers: Gaussian means only")
+    ap.add_argument("--gaussian-mode", default="hybrid", choices=["hybrid", "samples", "centers"],
+                    help="hybrid (default): precision/accuracy/floaters/centroids/angles from Gaussian centres, "
+                         "recall/completeness/leaf area/coverage from footprint samples; or one of the two alone")
     ap.add_argument("--samples", type=int, default=600_000)
     ap.add_argument("--gate", type=float, default=0.03, help="floater distance gate (m)")
     ap.add_argument("--crop", type=float, default=0.3, help="margin around the tree bbox (m)")
@@ -253,10 +275,19 @@ def main():
     bbox = (pts.min(0) - a.crop, pts.max(0) + a.crop)
     if a.dataparser_transforms:  # bbox must be in the recon's frame; crop after mapping instead
         bbox = None
-    P, N, kind = load_recon(a.recon, a.kind, a.opacity_min, rng, gaussian_mode=a.gaussian_mode, n_samples=a.samples, bbox=bbox)
-    if a.dataparser_transforms:
-        P, N = apply_dataparser_inverse(P, N, a.dataparser_transforms)
-    m = evaluate(P, N, tree, tau=a.tau, gate=a.gate, crop=a.crop)
+    modes = ["centers", "samples"] if a.gaussian_mode == "hybrid" else [a.gaussian_mode]
+    res = {}
+    for mode in modes:
+        P, N, kind = load_recon(a.recon, a.kind, a.opacity_min, rng, gaussian_mode=mode, n_samples=a.samples, bbox=bbox)
+        if a.dataparser_transforms:
+            P, N = apply_dataparser_inverse(P, N, a.dataparser_transforms)
+        res[mode] = evaluate(P, N, tree, tau=a.tau, gate=a.gate, crop=a.crop)
+        if kind != "gaussians":
+            break
+    if kind == "gaussians" and a.gaussian_mode == "hybrid":
+        m = hybrid_metrics(res["centers"], res["samples"])
+    else:
+        m = next(iter(res.values()))
     m["recon_kind"] = kind + (f" ({a.gaussian_mode})" if kind == "gaussians" else "")
     if kind == "gaussians":  # diagnostics: how many splats are near the tree and how big they are
         v = read_ply(a.recon)["vertex"]
@@ -267,7 +298,7 @@ def main():
         m["gaussians_total"], m["gaussians_near_tree"] = int(len(c)), int(near.sum())
         m["gaussians_near_tree_opacity_ge_min"] = int((near & (op >= a.opacity_min)).sum())
         m["near_tree_max_scale_mm_p50_p90"] = [float(np.percentile(smax[near], 50) * 1000), float(np.percentile(smax[near], 90) * 1000)] if near.any() else None
-    print(json.dumps(m, indent=1))
+    print(json.dumps({k: v for k, v in m.items() if k != "raw"}, indent=1))  # raw centres/samples results go to --out
     if a.out:
         json.dump(m, open(a.out, "w"), indent=1)
 
