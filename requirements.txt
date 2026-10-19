@@ -5,3 +5,6 @@ opencv-python-headless>=4.8
 scipy>=1.10
 matplotlib>=3.7
 pytest>=7
+
+# optional, for real-sensor capture (scripts/capture/rs_capture.py)
+# Linux/Windows: pyrealsense2   macOS arm64: pyrealsense2-macosx

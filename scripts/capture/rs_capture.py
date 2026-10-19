@@ -61,6 +61,9 @@ class Camera:
     def __init__(self, width, height, fps, preset=None, laser_power=None, warmup=30):
         rs = _rs()
         self.rs = rs
+        if len(rs.context().query_devices()) == 0:
+            sys.exit("No RealSense device found. Plug the camera into a USB-3 port (blue / USB-C data cable), "
+                     "then retry; on macOS run with sudo if it is connected but still not found.")
         self.pipe = rs.pipeline()
         cfg = rs.config()
         cfg.enable_stream(rs.stream.color, width, height, rs.format.rgb8, fps)
