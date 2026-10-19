@@ -63,6 +63,9 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
+    # gsplat JIT-compiles its CUDA kernels on first use; ninja's default parallelism (-j 10)
+    # runs Kaggle out of RAM ("Killed", exit 137). Cap it; later runs reuse the built kernels.
+    os.environ.setdefault("MAX_JOBS", "2")
     import synthtree_dataset
     root = synthtree_dataset.find_dataset_root(a.dataset) if not a.dry_run else f"/kaggle/input/{a.dataset}"
     res_dir = os.path.join(a.work, "results")
@@ -113,6 +116,8 @@ def main():
                         break
             if not ok:
                 print(f"  FAILED - last lines of {log}:\n{tail(log)}")
+                for d in (runs, os.path.join(a.work, "export", name), data):  # allow a clean retry
+                    shutil.rmtree(d, ignore_errors=True)
                 continue
             if not a.dry_run:
                 g = json.load(open(geom_json))
