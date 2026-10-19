@@ -20,9 +20,9 @@ ns-train splatfacto --data /kaggle/working/ns_t01_calm --output-dir /kaggle/work
     --pipeline.model.background-color white \
     nerfstudio-data --orientation-method none --center-method none --auto-scale-poses False --eval-mode filename
 # 4) evaluate on the held-out views + export Gaussians for the geometry metrics
-TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1 ns-eval --load-config /kaggle/working/runs/ns_t01_calm/splatfacto/*/config.yml --output-path /kaggle/working/eval.json \
+python /kaggle/working/synthtree/kaggle/ns_safe.py eval --load-config /kaggle/working/runs/ns_t01_calm/splatfacto/*/config.yml --output-path /kaggle/working/eval.json \
     --render-output-path /kaggle/working/renders
-TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1 ns-export gaussian-splat --load-config /kaggle/working/runs/ns_t01_calm/splatfacto/*/config.yml --output-dir /kaggle/working/export
+python /kaggle/working/synthtree/kaggle/ns_safe.py export gaussian-splat --load-config /kaggle/working/runs/ns_t01_calm/splatfacto/*/config.yml --output-dir /kaggle/working/export
 ```
 
 Then on any machine with this repo:
@@ -42,8 +42,8 @@ pixels harder, use `random` (default) instead.
 - `pip install nerfstudio` downgrades numpy to 1.26 and protobuf; the long red "dependency conflicts"
   list is harmless for training. Kaggle's OpenCV then may not import; the SynthTree loader falls back to Pillow.
 - PyTorch >= 2.6 loads checkpoints with `weights_only=True`, which fails on nerfstudio checkpoints
-  (`Unsupported global: numpy.core.multiarray.scalar`). Prefix `ns-eval` / `ns-export` / `ns-render` with
-  `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` (safe: the checkpoint is your own).
+  (`Unsupported global: numpy.core.multiarray.scalar`). Use `python kaggle/ns_safe.py eval|export|render ...`
+  instead of `ns-eval` / `ns-export` / `ns-render` (safe: the checkpoint is your own).
 - Run cells interactively in the editor first; a background "Save & Run All" shows no logs until it ends.
 
 ## If PSNR is low (< 25 dB) — likely bugs, in order
