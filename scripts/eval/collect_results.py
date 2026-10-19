@@ -36,7 +36,7 @@ def main():
         method, tree, wind, sensor = parts[:4]
         U = float(levels[wind]) if wind in levels else float(wind)
         d = json.load(open(f))
-        d = d.get("mean", d)
+        d = d.get("mean") or d.get("results") or d  # eval_images: mean; ns-eval: results
         key = (method, tree.replace("tree_", ""), U, sensor)
         runs.setdefault(key, {}).update({k: v for k, v in d.items() if isinstance(v, (int, float))})
     cols = sorted({k for v in runs.values() for k in v})
