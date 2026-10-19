@@ -6,3 +6,4 @@ logs/
 .pytest_cache/
 *.blend1
 .venv-kaggle/
+paper/main.pdf
