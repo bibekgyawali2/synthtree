@@ -24,11 +24,37 @@ SEMANTIC = {0: "background", 1: "leaf", 2: "wood", 3: "pot", 4: "ground", 5: "ro
 
 
 def _imread(path):
-    import cv2
-    im = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-    if im is None:
+    """RGB(A) or single-channel PNG, keeping 16-bit depth. OpenCV if importable, else Pillow
+    (e.g. after `pip install nerfstudio` downgrades numpy below what Kaggle's OpenCV needs)."""
+    if not os.path.exists(path):
         raise FileNotFoundError(path)
-    return im[..., ::-1].copy() if im.ndim == 3 else im
+    try:
+        import cv2
+        im = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        if im is None:
+            raise FileNotFoundError(path)
+        return im[..., ::-1].copy() if im.ndim == 3 else im
+    except ImportError:
+        with open(path, "rb") as f:
+            head = f.read(26)
+        bit_depth, color_type = head[24], head[25]
+        if bit_depth == 16 and color_type in (2, 6):  # Pillow would silently drop 16-bit RGB to 8 bit
+            raise ImportError(f"{path}: 16-bit RGB PNG (normals/flow) needs OpenCV; "
+                              "`pip install opencv-python-headless` matching your numpy")
+        from PIL import Image
+        with Image.open(path) as im:
+            a = np.asarray(im)
+        return (a.astype(np.uint16) if bit_depth == 16 else a).copy()
+
+
+def find_dataset_root(name="synthtree-v1", base="/kaggle/input"):
+    """Locate the mounted dataset (Kaggle mounts at /kaggle/input/<name> or /kaggle/input/datasets/<user>/<name>)."""
+    for r, dirs, _ in os.walk(base):
+        if os.path.basename(r) == name or ("trees" in dirs and any(d.startswith("tree_") for d in dirs)):
+            return r
+        if r.count(os.sep) - base.count(os.sep) >= 3:
+            dirs[:] = []
+    raise FileNotFoundError(f"dataset '{name}' not found under {base}; is it added as an Input? Found: {os.listdir(base)}")
 
 
 def list_sequences(root, kind="wind"):
@@ -47,6 +73,9 @@ def ensure_extracted(path, cache="/kaggle/working/synthtree_cache"):
     if os.path.isdir(path):
         return path
     zp = path if path.endswith(".zip") else path + ".zip"
+    if not os.path.exists(zp):
+        raise FileNotFoundError(f"sequence not found: {path} (nor {zp}). Locate the dataset with find_dataset_root() "
+                                f"or `!find /kaggle/input -maxdepth 4 -name tree_01`")
     tree = os.path.basename(os.path.dirname(zp))
     dst = os.path.join(cache, tree, os.path.basename(zp)[:-4])
     if not os.path.isdir(dst):
