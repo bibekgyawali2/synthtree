@@ -38,11 +38,17 @@ def load(path):
 
 def decompose(rows, metric, higher_better=False):
     sign = -1.0 if higher_better else 1.0
-    E = defaultdict(dict)  # (method, tree) -> {(U, sensor): value}
+    raw = defaultdict(list)  # (method, tree, U, sensor) -> values over seeds
     for r in rows:
         if r.get(metric) in (None, ""):
             continue
-        E[(r["method"], r["tree"])][(r["wind_U"], r["sensor"])] = sign * float(r[metric])
+        raw[(r["method"], r["tree"], r["wind_U"], r["sensor"])].append(sign * float(r[metric]))
+    E = defaultdict(dict)  # (method, tree) -> {(U, sensor): seed-mean value}
+    seed_sd = defaultdict(list)  # method -> per-configuration std over seeds (training noise)
+    for (m, t, U, s), v in raw.items():
+        E[(m, t)][(U, s)] = float(np.mean(v))
+        if len(v) > 1:
+            seed_sd[m].append(float(np.std(v, ddof=1)))
     per = defaultdict(lambda: defaultdict(list))  # method -> component -> [(U, value)]
     for (method, tree), e in E.items():
         if (0.0, "clean") not in e or (0.0, "noisy") not in e:
@@ -58,7 +64,7 @@ def decompose(rows, metric, higher_better=False):
                     per[method]["wind_clean_only"].append((U, e[(U, "clean")] - cc))
     summary = {}
     for method, comps in per.items():
-        summary[method] = {}
+        summary[method] = {"_seed_noise_std": float(np.mean(seed_sd[method])) if seed_sd[method] else None}
         for comp, vals in comps.items():
             byU = defaultdict(list)
             for U, v in vals:
@@ -74,24 +80,31 @@ def plot(summary, metric, out):
     import matplotlib.pyplot as plt
     methods = sorted(summary)
     fig, axs = plt.subplots(1, 2, figsize=(11, 4))
-    # left: stacked bars at the strongest wind = method + sensor + wind
+    # left: grouped bars at the strongest wind (grouped, not stacked: sensor error can be negative)
     ax = axs[0]
+    labels = ["occlusion/method", "sensor", "wind (strongest U)", "interaction"]
+    colors = ["#4c72b0", "#dd8452", "#55a868", "#8172b3"]
+    width = 0.8 / len(labels)
     for k, m in enumerate(methods):
         s = summary[m]
         Umax = max(s.get("wind", {"0": 0}), key=float)
-        parts = [s["method"]["0"]["mean"], s["sensor"]["0"]["mean"], s.get("wind", {}).get(Umax, {"mean": 0})["mean"]]
-        bottom = 0
-        for p, lab, col in zip(parts, ["occlusion/method", "sensor", f"wind (U={Umax})"], ["#4c72b0", "#dd8452", "#55a868"]):
-            ax.bar(k, p, bottom=bottom, color=col, label=lab if k == 0 else None)
-            bottom += p
+        vals = [s["method"]["0"], s["sensor"]["0"], s.get("wind", {}).get(Umax), s.get("interaction", {}).get(Umax)]
+        for i, (v, lab, col) in enumerate(zip(vals, labels, colors)):
+            if v is None:
+                continue
+            ax.bar(k + (i - 1.5) * width, v["mean"], width, yerr=v["std"] if v["n_trees"] > 1 else None,
+                   color=col, capsize=2, label=lab if k == 0 else None)
+    ax.axhline(0, color="k", lw=0.5)
     ax.set_xticks(range(len(methods)), methods, rotation=20)
     ax.set_ylabel(metric)
-    ax.set_title("error budget at the strongest wind")
-    ax.legend()
+    ax.set_title("error components (mean +- std over trees)")
+    ax.legend(fontsize=8)
     # right: wind component vs U per method
     ax = axs[1]
     for m in methods:
         w = summary[m].get("wind", {})
+        if not isinstance(w, dict):
+            continue
         if not w:
             continue
         U = [0.0] + [float(u) for u in w]

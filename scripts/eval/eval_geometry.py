@@ -86,6 +86,12 @@ def load_recon(path, kind, opacity_min, rng, n_mesh=400_000, gaussian_mode="samp
     elif kind == "mesh":
         F = ply["face"]["v"].astype(np.int64)
         P, N, _, _ = sample_mesh(P, F, n_mesh, rng)
+    elif {"nx", "ny", "nz"} <= set(names):  # point cloud with stored normals (e.g. ns-export pointcloud)
+        N = np.stack([v["nx"], v["ny"], v["nz"]], 1).astype(np.float64)
+        N /= np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-12)
+        if bbox is not None:
+            keep = np.all((P > bbox[0]) & (P < bbox[1]), axis=1)
+            P, N = P[keep], N[keep]
     return P, N, kind
 
 
@@ -193,6 +199,7 @@ def evaluate(recon_P, recon_N, tree, tau=0.005, n_gt=300_000, crop=0.3, min_pts=
         "floor_frac": float(np.mean(owner[j] == 3)),
         "accuracy_mm_median": float(np.median(acc) * 1000) if len(acc) else None,
         "accuracy_mm": float(np.mean(np.minimum(acc, cap)) * 1000) if len(acc) else None,
+        "accuracy_mm_median_inliers": float(np.median(d_all[is_leaf]) * 1000) if is_leaf.any() else None,
         "completeness_mm_median": float(np.median(np.minimum(comp, cap)) * 1000),
         "completeness_mm": float(np.mean(np.minimum(comp, cap)) * 1000),
         "precision": prec, "recall": rec, "fscore": 2 * prec * rec / max(prec + rec, 1e-12),
@@ -217,13 +224,22 @@ def evaluate(recon_P, recon_N, tree, tau=0.005, n_gt=300_000, crop=0.3, min_pts=
         out["leaf_angle_w1_deg"] = wasserstein1(rc_ang, gt_ang)
         out["leaf_angle_kl"] = kl_hist(rc_ang, gt_ang)
         out["leaf_angle_mean_gt_deg"], out["leaf_angle_mean_recon_deg"] = float(gt_ang.mean()), float(rc_ang.mean())
-    # per-leaf centroid error (attribution = leaf of nearest GT leaf sample)
+    # per-unit centroid error and coverage (attribution = leaf of nearest GT leaf sample).
+    # Units are single leaves, except for needle trees: needles are thinner than a pixel, so they are
+    # grouped into shoots (all needles on one twig), the usual unit in conifer phenotyping.
+    meta = json.loads(str(tree["meta_json"])) if "meta_json" in tree else tree.get("meta", {})
+    shoots = meta.get("leaf_type") == "needle"
+    unit = np.unique(tree["leaf_branch"], return_inverse=True)[1].ravel() if shoots else np.arange(L)
+    n_units = int(unit.max()) + 1
+    out["per_unit"], out["n_units"] = ("shoot" if shoots else "leaf"), n_units
     if len(RL):
         _, jl = t_leaf.query(RL)
-        lid = g_leaf[jl]
-        cnt = np.bincount(lid, minlength=L)
-        cen = np.stack([np.bincount(lid, RL[:, k], L) for k in range(3)], 1) / np.maximum(cnt, 1)[:, None]
-        gtc = tree["leaf_centroid"] if leaf_T is None else np.einsum("nij,nj->ni", leaf_T[:, :, :3], tree["leaf_centroid"]) + leaf_T[:, :, 3]
+        uid = unit[g_leaf[jl]]
+        cnt = np.bincount(uid, minlength=n_units)
+        cen = np.stack([np.bincount(uid, RL[:, k], n_units) for k in range(3)], 1) / np.maximum(cnt, 1)[:, None]
+        gtc_leaf = tree["leaf_centroid"] if leaf_T is None else np.einsum("nij,nj->ni", leaf_T[:, :, :3], tree["leaf_centroid"]) + leaf_T[:, :, 3]
+        a = tree["leaf_area"]
+        gtc = np.stack([np.bincount(unit, a * gtc_leaf[:, k], n_units) for k in range(3)], 1) / np.bincount(unit, a, n_units)[:, None]
         ok = cnt >= min_pts
         e = np.linalg.norm(cen[ok] - gtc[ok], axis=1) * 1000
         out["leaf_coverage"] = float(ok.mean())
@@ -233,6 +249,7 @@ def evaluate(recon_P, recon_N, tree, tau=0.005, n_gt=300_000, crop=0.3, min_pts=
 
 
 CENTER_KEYS = ("n_recon_points_near_tree", "floater_frac", "floor_frac", "accuracy_mm_median", "accuracy_mm",
+               "accuracy_mm_median_inliers", "per_unit", "n_units",
                "precision", "leaf_angle_w1_deg", "leaf_angle_kl", "leaf_angle_mean_gt_deg", "leaf_angle_mean_recon_deg",
                "centroid_err_mm_median", "centroid_err_mm_p90")
 SAMPLE_KEYS = ("n_leaf_attributed", "completeness_mm_median", "completeness_mm", "recall", "leaf_area_gt_m2",
