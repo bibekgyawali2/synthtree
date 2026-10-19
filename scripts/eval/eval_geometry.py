@@ -13,9 +13,13 @@ Reconstruction inputs:
 If the method normalised the scene (e.g. nerfstudio without --orientation-method none ...),
 pass its dataparser_transforms.json to map back into metric world coordinates.
 
-Metrics (leaf = GT leaf surface; points are attributed to the nearest GT surface - leaf, wood,
-pot - and only leaf-attributed points count, within --crop of the tree):
-  chamfer_mm         mean of accuracy (recon->GT leaves) and completeness (GT leaves->recon), mm
+Metrics. Every reconstruction point is attributed to its nearest GT surface - leaf, wood, pot/soil
+or FLOOR (z = 0) - within --crop of the tree; points farther than --gate (3 cm) from every surface
+are floaters (floater_frac, reported separately). Gaussians are evaluated by default as samples
+spread over each Gaussian's footprint (--gaussian-mode samples), not just their centres.
+Means are capped at 5 cm (robust to floaters); medians are reported too.
+  chamfer_mm         mean of accuracy (recon->GT leaves, incl. floaters nearest a leaf) and completeness
+                     (GT leaves->leaf-attributed recon), capped means in mm
   accuracy_mm / completeness_mm, precision / recall / fscore at tau
   leaf_area_error    recovered leaf area (GT leaf area whose samples lie within tau of the recon)
                      vs total GT leaf area; per leaf and overall (relative)
@@ -53,7 +57,7 @@ def sample_mesh(V, F, n, rng, face_attr=None):
     return P, N, fi, area.sum()
 
 
-def load_recon(path, kind, opacity_min, rng, n_mesh=400_000):
+def load_recon(path, kind, opacity_min, rng, n_mesh=400_000, gaussian_mode="samples", n_samples=400_000):
     ply = read_ply(path)
     v = ply["vertex"]
     names = v.dtype.names
@@ -73,10 +77,31 @@ def load_recon(path, kind, opacity_min, rng, n_mesh=400_000):
                       np.stack([2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)], -1)], 1)
         N = R[np.arange(len(R)), :, np.argmin(sc, 1)]
         P = P[keep]
+        if gaussian_mode == "samples":
+            P, N = sample_gaussians(P, R, np.exp(sc.astype(np.float64)), op[keep], n_samples, rng)
     elif kind == "mesh":
         F = ply["face"]["v"].astype(np.int64)
         P, N, _, _ = sample_mesh(P, F, n_mesh, rng)
     return P, N, kind
+
+
+def sample_gaussians(mu, R, S, opacity, n, rng, clip=2.0):
+    """Surface samples spread over each Gaussian's footprint (flattened onto its two largest axes).
+
+    Centres alone under-cover the surface: a Gaussian is a blob, and ~1 cm centre spacing
+    leaves most leaf surface > 5 mm from any centre even when the blobs fully cover it.
+    Samples per Gaussian ~ opacity x footprint area; offsets ~ N(0, s) clipped to +-2 s.
+    Normals = the Gaussian's smallest axis.
+    """
+    order = np.argsort(S, axis=1)  # smallest axis first
+    idx = np.arange(len(S))
+    a1, a2, a0 = order[:, 2], order[:, 1], order[:, 0]
+    w = opacity * S[idx, a1] * S[idx, a2]
+    k = rng.multinomial(n, w / w.sum())
+    g = np.repeat(idx, k)
+    z = np.clip(rng.standard_normal((len(g), 2)), -clip, clip)
+    off = (R[g, :, a1[g]] * (S[g, a1[g]] * z[:, 0])[:, None] + R[g, :, a2[g]] * (S[g, a2[g]] * z[:, 1])[:, None])
+    return mu[g] + off, R[g, :, a0[g]]
 
 
 def pca_normals(P, k=16):
@@ -116,8 +141,11 @@ def kl_hist(a, b, bins=9):
     return float(np.sum(pa * np.log(pa / pb)))
 
 
-def evaluate(recon_P, recon_N, tree, tau=0.005, n_gt=300_000, crop=0.3, min_pts=10, seed=0, leaf_T=None):
-    """leaf_T: optional (L,3,4) to evaluate against a posed (non-canonical) leaf state."""
+def evaluate(recon_P, recon_N, tree, tau=0.005, n_gt=300_000, crop=0.3, min_pts=10, seed=0, leaf_T=None,
+             gate=0.03, cap=0.05):
+    """leaf_T: optional (L,3,4) to evaluate against a posed (non-canonical) leaf state.
+    gate: points farther than this from every GT surface (leaf/wood/pot/floor) are floaters.
+    cap: distances are capped here in the means (medians are reported uncapped)."""
     from scipy.spatial import cKDTree
     rng = np.random.default_rng(seed)
     LV, LF = tree["leaf_verts"].copy(), tree["leaf_faces"]
@@ -130,9 +158,13 @@ def evaluate(recon_P, recon_N, tree, tau=0.005, n_gt=300_000, crop=0.3, min_pts=
     Pw, _, _, _ = sample_mesh(tree["wood_verts"], tree["wood_faces"], n_gt // 4, rng)
     Pp, _, _, _ = sample_mesh(np.concatenate([tree["pot_verts"], tree["soil_verts"]]),
                               np.concatenate([tree["pot_faces"], tree["soil_faces"] + len(tree["pot_verts"])]), n_gt // 8, rng)
-    allP = np.concatenate([Pg, Pw, Pp])
-    owner = np.concatenate([np.ones(len(Pg), bool), np.zeros(len(Pw) + len(Pp), bool)])
-    lo, hi = allP.min(0) - crop, allP.max(0) + crop
+    lo, hi = np.concatenate([Pg, Pw, Pp]).min(0) - crop, np.concatenate([Pg, Pw, Pp]).max(0) + crop
+    # the floor must be part of the attribution, otherwise floor Gaussians under the canopy
+    # are matched to the leaves above them
+    gx, gy = np.meshgrid(np.arange(lo[0], hi[0], 0.003), np.arange(lo[1], hi[1], 0.003))
+    Pf = np.stack([gx.ravel(), gy.ravel(), np.zeros(gx.size)], 1)
+    allP = np.concatenate([Pg, Pw, Pp, Pf])
+    owner = np.concatenate([np.zeros(len(Pg), int), np.ones(len(Pw), int), np.full(len(Pp), 2), np.full(len(Pf), 3)])
     inbox = np.all((recon_P > lo) & (recon_P < hi), axis=1)
     R = recon_P[inbox]
     RN = None if recon_N is None else recon_N[inbox]
@@ -140,17 +172,23 @@ def evaluate(recon_P, recon_N, tree, tau=0.005, n_gt=300_000, crop=0.3, min_pts=
         return {"error": "no reconstruction points near the tree"}
     t_all = cKDTree(allP)
     d_all, j = t_all.query(R)
-    is_leaf = owner[j]
+    nearest_leaf = owner[j] == 0
+    floater = d_all >= gate
+    is_leaf = nearest_leaf & ~floater  # attributed to leaves
     RL = R[is_leaf]
     t_leaf = cKDTree(Pg)
-    acc = d_all[is_leaf]
+    acc = d_all[nearest_leaf]  # floaters closest to leaves count against accuracy / precision
     comp, _ = cKDTree(RL).query(Pg) if len(RL) else (np.full(len(Pg), np.inf), None)
     prec = float(np.mean(acc < tau)) if len(acc) else 0.0
     rec = float(np.mean(comp < tau))
     out = {
-        "n_recon_points_near_tree": int(len(R)), "n_leaf_attributed": int(len(RL)), "tau_m": tau,
-        "accuracy_mm": float(np.mean(acc) * 1000) if len(acc) else None,
-        "completeness_mm": float(np.mean(np.minimum(comp, 0.1)) * 1000),
+        "n_recon_points_near_tree": int(len(R)), "n_leaf_attributed": int(len(RL)), "tau_m": tau, "gate_m": gate,
+        "floater_frac": float(floater.mean()),
+        "floor_frac": float(np.mean(owner[j] == 3)),
+        "accuracy_mm_median": float(np.median(acc) * 1000) if len(acc) else None,
+        "accuracy_mm": float(np.mean(np.minimum(acc, cap)) * 1000) if len(acc) else None,
+        "completeness_mm_median": float(np.median(np.minimum(comp, cap)) * 1000),
+        "completeness_mm": float(np.mean(np.minimum(comp, cap)) * 1000),
         "precision": prec, "recall": rec, "fscore": 2 * prec * rec / max(prec + rec, 1e-12),
     }
     out["chamfer_mm"] = 0.5 * (out["accuracy_mm"] + out["completeness_mm"]) if out["accuracy_mm"] is not None else None
@@ -193,18 +231,22 @@ def main():
     ap.add_argument("--recon", required=True)
     ap.add_argument("--tree-dir", required=True, help="trees/tree_XX (contains canonical/)")
     ap.add_argument("--kind", default="auto", choices=["auto", "gaussians", "mesh", "points"])
-    ap.add_argument("--opacity-min", type=float, default=0.5)
+    ap.add_argument("--opacity-min", type=float, default=0.1)
+    ap.add_argument("--gaussian-mode", default="samples", choices=["samples", "centers"],
+                    help="samples: points spread over each Gaussian footprint (default); centers: Gaussian means only")
+    ap.add_argument("--samples", type=int, default=600_000)
+    ap.add_argument("--gate", type=float, default=0.03, help="floater distance gate (m)")
     ap.add_argument("--tau", type=float, default=0.005)
     ap.add_argument("--dataparser-transforms")
     ap.add_argument("--out")
     a = ap.parse_args()
     tree = load_tree(os.path.join(a.tree_dir, "canonical", "canonical_tree.npz"))
     rng = np.random.default_rng(0)
-    P, N, kind = load_recon(a.recon, a.kind, a.opacity_min, rng)
+    P, N, kind = load_recon(a.recon, a.kind, a.opacity_min, rng, gaussian_mode=a.gaussian_mode, n_samples=a.samples)
     if a.dataparser_transforms:
         P, N = apply_dataparser_inverse(P, N, a.dataparser_transforms)
-    m = evaluate(P, N, tree, tau=a.tau)
-    m["recon_kind"] = kind
+    m = evaluate(P, N, tree, tau=a.tau, gate=a.gate)
+    m["recon_kind"] = kind + (f" ({a.gaussian_mode})" if kind == "gaussians" else "")
     print(json.dumps(m, indent=1))
     if a.out:
         json.dump(m, open(a.out, "w"), indent=1)

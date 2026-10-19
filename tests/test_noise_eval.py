@@ -125,7 +125,7 @@ def test_geometry_metrics(small_tree, tmp_path):
         hdr = ["ply", "format binary_little_endian 1.0", f"element vertex {n}"] + [f"property float {k}" for k in rec.dtype.names] + ["end_header"]
         f.write(("\n".join(hdr) + "\n").encode())
         f.write(rec.tobytes())
-    Pg, Ng, kind = load_recon(str(tmp_path / "g.ply"), "auto", 0.5, rng)
+    Pg, Ng, kind = load_recon(str(tmp_path / "g.ply"), "auto", 0.5, rng, gaussian_mode="centers")
     assert kind == "gaussians" and np.allclose(np.abs(np.einsum("ij,ij->i", Ng, nz)), 1, atol=1e-4)
 
 
@@ -141,3 +141,40 @@ def test_decomposition_arithmetic():
     s = decompose(rows, "e")["m"]
     assert s["method"]["0"]["mean"] == 3.0 and s["sensor"]["0"]["mean"] == 1.0
     assert s["wind"]["5"]["mean"] == 3.0 and s["interaction"]["5"]["mean"] == 0.5
+
+
+def _fake_splat(tree, rng, density=7200.0, n_floor=4000, n_float=300, s_in=0.006):
+    """Flat Gaussians covering the leaves + floor Gaussians under the canopy + floaters.
+    density ~ leaf Gaussians per m^2 of leaf, as measured on a real splatfacto export (tree 1)."""
+    from eval_geometry import sample_mesh
+    n_leaf = int(density * tree["leaf_area"].sum())
+    P, N, _, _ = sample_mesh(tree["leaf_verts"], tree["leaf_faces"], n_leaf, rng)
+    lo, hi = tree["leaf_verts"].min(0), tree["leaf_verts"].max(0)
+    floor = np.stack([rng.uniform(lo[0], hi[0], n_floor), rng.uniform(lo[1], hi[1], n_floor), np.zeros(n_floor)], 1)
+    flo = rng.uniform(lo, hi, (n_float, 3))
+    mu = np.concatenate([P, floor, flo])
+    nrm = np.concatenate([N, np.tile([0, 0, 1.0], (n_floor + n_float, 1))])
+    # rotation whose 3rd column is the normal
+    a = np.where(np.abs(nrm[:, :1]) < 0.9, [[1.0, 0, 0]], [[0, 1.0, 0]])
+    e1 = np.cross(nrm, a)
+    e1 /= np.linalg.norm(e1, axis=1, keepdims=True)
+    e2 = np.cross(nrm, e1)
+    R = np.stack([e1, e2, nrm], axis=2)
+    S = np.tile([s_in, s_in, 0.0005], (len(mu), 1))
+    return mu, R, S, np.full(len(mu), 0.9), P
+
+
+def test_geometry_floor_and_gaussian_footprints(small_tree):
+    from eval_geometry import evaluate, sample_gaussians
+    rng = np.random.default_rng(1)
+    mu, R, S, op, _ = _fake_splat(small_tree, rng)
+    centers = evaluate(mu, R[:, :, 2], small_tree, tau=0.005, n_gt=100_000)
+    Ps, Ns = sample_gaussians(mu, R, S, op, 300_000, rng)
+    samples = evaluate(Ps, Ns, small_tree, tau=0.005, n_gt=100_000)
+    # floor Gaussians are attributed to the floor, not to the leaves above them
+    assert centers["floor_frac"] > 0.3 and centers["accuracy_mm_median"] < 2.0
+    assert 0.01 < centers["floater_frac"] < 0.1
+    # footprint samples recover far more of the leaf surface than centres alone
+    assert samples["recall"] > centers["recall"] + 0.3
+    assert samples["leaf_area_rel_error"] < centers["leaf_area_rel_error"]
+    assert samples["centroid_err_mm_median"] < 8.0  # footprints spill ~2 sigma past leaf edges
