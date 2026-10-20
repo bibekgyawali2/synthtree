@@ -92,6 +92,8 @@ def one_run(a, M, method, iters, tid, level, variant, seed, name, root, res_dir,
         ok = all(sh(cmd, log, a.dry_run) == 0 for cmd in post)
     if not ok:
         print(f"  FAILED - last lines of {log}:\n{tail(log)}")
+        if "Error building extension" in tail(log, 400):  # environment problem: every later run would fail too
+            sys.exit("CUDA extension build failed - stopping this worker instead of failing every remaining run")
         for d in (runs, export, data):  # allow a clean retry on the next invocation
             shutil.rmtree(d, ignore_errors=True)
         return None
