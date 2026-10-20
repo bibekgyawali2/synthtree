@@ -117,6 +117,8 @@ def main():
     ap.add_argument("--iters", type=int, default=None, help="override the per-method default iterations")
     ap.add_argument("--init-ply", default="auto", help="auto = same depth variant as the images; or clean/noisy/none")
     ap.add_argument("--keep", action="store_true", help="keep trained models and exports")
+    ap.add_argument("--shard", type=int, default=0, help="this worker's index (use one worker per GPU)")
+    ap.add_argument("--num-shards", type=int, default=1, help="number of parallel workers")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -128,24 +130,24 @@ def main():
     res_dir = os.path.join(a.work, "results")
     os.makedirs(res_dir, exist_ok=True)
     summary = []
-    for method in a.methods:
+    jobs = [(method, tid, run, seed) for method in a.methods for tid in a.trees for run in a.runs for seed in a.seeds]
+    jobs = jobs[a.shard::a.num_shards]  # round-robin split across workers / GPUs
+    print(f"worker {a.shard}/{a.num_shards}: {len(jobs)} runs", flush=True)
+    for method, tid, run, seed in jobs:
         M = METHODS[method]
         iters = a.iters or M["iters"]
-        for tid in a.trees:
-            for run in a.runs:
-                for seed in a.seeds:
-                    level, variant = run.split(":")
-                    name = f"{method}__tree_{tid:02d}__{level}__{variant}__s{seed}"
-                    geom_json = os.path.join(res_dir, name + "__geom.json")
-                    legacy = os.path.join(res_dir, f"{method}__tree_{tid:02d}__{level}__{variant}__geom.json")
-                    done = geom_json if os.path.exists(geom_json) else (legacy if seed == 0 and os.path.exists(legacy) else None)
-                    if done:
-                        print(f"[skip] {name} (done)")
-                        summary.append((name, json.load(open(done))))
-                        continue
-                    r = one_run(a, M, method, iters, tid, level, variant, seed, name, root, res_dir, geom_json)
-                    if r is not None:
-                        summary.append((name, r))
+        level, variant = run.split(":")
+        name = f"{method}__tree_{tid:02d}__{level}__{variant}__s{seed}"
+        geom_json = os.path.join(res_dir, name + "__geom.json")
+        legacy = os.path.join(res_dir, f"{method}__tree_{tid:02d}__{level}__{variant}__geom.json")
+        done = geom_json if os.path.exists(geom_json) else (legacy if seed == 0 and os.path.exists(legacy) else None)
+        if done:
+            print(f"[skip] {name} (done)")
+            summary.append((name, json.load(open(done))))
+            continue
+        r = one_run(a, M, method, iters, tid, level, variant, seed, name, root, res_dir, geom_json)
+        if r is not None:
+            summary.append((name, r))
     if summary:
         print(f"\n{'run':52s} {'F@5mm':>6s} {'chamfer':>8s} {'area_err':>8s} {'cover':>6s} {'floaters':>8s}")
         for name, g in summary:

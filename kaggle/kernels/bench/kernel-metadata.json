@@ -1,6 +1,6 @@
 {
-  "id": "bibekgyawali2/synthtree-bench-splatfacto",
-  "title": "synthtree-bench-splatfacto",
+  "id": "bibekgyawali2/synthtree-bench",
+  "title": "synthtree-bench",
   "code_file": "bench.py",
   "language": "python",
   "kernel_type": "script",
