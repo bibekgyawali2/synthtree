@@ -1,7 +1,7 @@
 """Kaggle script kernel: full SynthTree benchmark on a 2x T4 machine (one worker per GPU).
 
 Pushed with `kaggle kernels push -p kaggle/kernels/bench`. Stage 1: splatfacto on trees 1, 3, 5, 7
-(broad, small, compound, needle) x 6 conditions x 2 seeds. Stage 2: depth-nerfacto on trees 1, 7.
+(broad, small, compound, needle) x 6 conditions x 2 seeds. Stage 2: the remaining depth-nerfacto runs.
 """
 import os
 import subprocess
@@ -12,9 +12,11 @@ import time
 REPO_URL = "https://github.com/bibekgyawali2/synthtree.git"
 WORK = "/kaggle/working"
 CODE = f"{WORK}/synthtree"
+# depth-nerfacto runs ~82 min each without tiny-cuda-nn; 8 of its 12 runs already finished in an
+# earlier job, so only the 4 missing ones are scheduled here (total ~6 h on 2x T4, limit 12 h).
 STAGES = [
     "--methods splatfacto --trees 1 3 5 7 --seeds 0 1",
-    "--methods depth-nerfacto --trees 1 7 --seeds 0",
+    "--methods depth-nerfacto --trees 7 --seeds 0 --runs low:noisy medium:noisy high:noisy high:clean",
 ]
 
 
