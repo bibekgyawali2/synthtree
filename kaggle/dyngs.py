@@ -137,7 +137,10 @@ def main():
 
     # ---------------------------------------------------------------- deformation field
     class Deform(torch.nn.Module):
-        def __init__(self, fx=10, ft=6, width=256, depth=8):
+        # ft=10 bands: with t normalised to [0,1] over a ~20 s orbit, the highest band is
+        # 2^9 cycles/2 per sequence (~13 Hz) - above the 3.75 Hz Nyquist limit of 7.5 fps frames.
+        # (Deformable 3DGS's ft=6 tops out at ~0.8 Hz here and cannot represent sway or flutter.)
+        def __init__(self, fx=10, ft=10, width=256, depth=8):
             super().__init__()
             self.fx, self.ft = fx, ft
             d_in = 3 * (1 + 2 * fx) + 1 * (1 + 2 * ft)
@@ -235,6 +238,12 @@ def main():
         if isinstance(posed[0][key], (int, float)) and all(p.get(key) is not None for p in posed):
             out["posed_" + key] = float(np.mean([p[key] for p in posed]))
     out["posed_psnr"] = psnr(deform is not None)
+    if deform is not None:  # diagnostic: how far does the learned deformation move Gaussians?
+        with torch.no_grad():
+            mags = [deform(params["means"], te_t[j].view(1, 1))[0].norm(dim=-1) for j in sel]
+            mags = torch.cat(mags)
+        out["deform_offset_mm_median"] = float(mags.median()) * 1000
+        out["deform_offset_mm_p95"] = float(torch.quantile(mags[torch.randperm(len(mags))[:100000]], 0.95)) * 1000
     out.update({"mode": a.mode, "variant": a.variant, "iters": a.iters, "n_gaussians": int(len(params["means"])),
                 "seconds": round(time.time() - t_start, 1)})
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
