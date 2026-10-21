@@ -1,0 +1,17 @@
+{
+  "experiment_name": "splatfacto__tree_01__low__noisy__s0",
+  "method_name": "splatfacto",
+  "checkpoint": "/kaggle/working/runs/splatfacto__tree_01__low__noisy__s0/splatfacto__tree_01__low__noisy__s0/splatfacto/2026-10-20_172849/nerfstudio_models/step-000006999.ckpt",
+  "results": {
+    "psnr": 27.8844051361084,
+    "psnr_std": 2.0953783988952637,
+    "ssim": 0.6610066294670105,
+    "ssim_std": 0.007779299281537533,
+    "lpips": 0.6296972036361694,
+    "lpips_std": 0.01771543361246586,
+    "num_rays_per_sec": 15710295.0,
+    "num_rays_per_sec_std": 4694751.5,
+    "fps": 38.596439361572266,
+    "fps_std": 11.533883094787598
+  }
+}

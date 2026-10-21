@@ -366,6 +366,28 @@ def results_assets(rows, levels, out, N):
         N["SpWindHiCentroid"] = fmt(ce["wind"][f"{hi:g}"]["mean"], 1)
         N["SpSeedStdF"] = fmt(sp["_seed_noise_std"], 3) if sp.get("_seed_noise_std") else "n/a"
 
+    nf = dec["fscore"].get("depth-nerfacto", {})
+    if nf:
+        N["NfBaseF"] = fmt(-nf["method"]["0"]["mean"], 3)
+        N["NfWindHiF"] = fmt(nf["wind"][f"{hi:g}"]["mean"], 3)
+        N["NfSensorF"] = fmt(nf["sensor"]["0"]["mean"], 3)
+        N["NfBaseCD"] = fmt(dec["chamfer_mm"]["depth-nerfacto"]["method"]["0"]["mean"], 1)
+        N["NfWindHiCD"] = fmt(dec["chamfer_mm"]["depth-nerfacto"]["wind"][f"{hi:g}"]["mean"], 1)
+
+    # sensor effect for splatfacto: Gaussian count and precision/recall, calm clean vs calm noisy (mean over trees)
+    def calm_mean(m, sensor, k):
+        per_tree = defaultdict(list)
+        for r in rows:
+            if r["method"] == m and r["wind_U"] == 0 and r["sensor"] == sensor:
+                per_tree[r["tree"]].append(g(r, k))
+        return float(np.mean([np.nanmean(v) for v in per_tree.values()])) if per_tree else np.nan
+    if any(r["method"] == "splatfacto" for r in rows):
+        nc, nn = calm_mean("splatfacto", "clean", "n_recon_points_near_tree"), calm_mean("splatfacto", "noisy", "n_recon_points_near_tree")
+        N["SpGaussClean"], N["SpGaussNoisy"] = f"{nc:,.0f}".replace(",", "{,}"), f"{nn:,.0f}".replace(",", "{,}")
+        N["SpGaussRatio"] = fmt(nc / nn, 1)
+        for k, nm in (("recall", "Rec"), ("precision", "Prec"), ("floater_frac", "Float")):
+            N[f"Sp{nm}Clean"], N[f"Sp{nm}Noisy"] = fmt(calm_mean("splatfacto", "clean", k), 2), fmt(calm_mean("splatfacto", "noisy", k), 2)
+
     fig, axs = plt.subplots(1, 3, figsize=(7.4, 2.5))
     colors = {"splatfacto": "#e76f51", "depth-nerfacto": "#2a9d8f"}
     for ax, (met, lab) in zip(axs, [("fscore", "F@5mm drop"), ("chamfer_mm", "CD increase [mm]"), ("centroid_err_mm_median", "centroid error increase [mm]")]):

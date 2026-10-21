@@ -1,0 +1,19 @@
+{
+  "experiment_name": "depth-nerfacto__tree_01__low__noisy__s0",
+  "method_name": "depth-nerfacto",
+  "checkpoint": "/kaggle/working/runs/depth-nerfacto__tree_01__low__noisy__s0/depth-nerfacto__tree_01__low__noisy__s0/depth-nerfacto/2026-10-20_064814/nerfstudio_models/step-000014999.ckpt",
+  "results": {
+    "psnr": 22.801544189453125,
+    "psnr_std": 0.5537464618682861,
+    "ssim": 0.5751171112060547,
+    "ssim_std": 0.017618020996451378,
+    "lpips": 0.7201743721961975,
+    "lpips_std": 0.01854255609214306,
+    "depth_mse": 3.480034351348877,
+    "depth_mse_std": 3.675098180770874,
+    "num_rays_per_sec": 29563.609375,
+    "num_rays_per_sec_std": 323.31488037109375,
+    "fps": 0.07263072580099106,
+    "fps_std": 0.0007943074451759458
+  }
+}
