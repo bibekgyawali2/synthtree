@@ -442,6 +442,50 @@ def results_assets(rows, levels, out, N):
     N["RelChangePSNR"] = fmt(rel("psnr"), 0)
 
 
+def dynamic_assets(rows, levels, out, N):
+    """Static vs deformable 3DGS (same implementation): rest-pose and per-frame posed evaluation."""
+    g = lambda r, k: float(r[k]) if r.get(k) not in (None, "") else np.nan  # noqa: E731
+    inv = {v: k for k, v in levels.items()}
+    rows = [r for r in rows if r["method"] in ("static3dgs", "dyn3dgs")]
+    if not rows:
+        return
+    Us = sorted({r["wind_U"] for r in rows})
+
+    def mean(m, U, k):
+        per_tree = defaultdict(list)
+        for r in rows:
+            if r["method"] == m and r["wind_U"] == U:
+                per_tree[r["tree"]].append(g(r, k))
+        v = [np.nanmean(x) for x in per_tree.values()]
+        v = [x for x in v if np.isfinite(x)]
+        return (float(np.mean(v)), float(np.std(v)), len(v)) if v else (np.nan, np.nan, 0)
+    keys = [("fscore", "F (rest)", 3), ("posed_fscore", "F (posed)", 3), ("chamfer_mm", "CD rest [mm]", 1),
+            ("posed_chamfer_mm", "CD posed [mm]", 1), ("posed_centroid_err_mm_median", "Centroid posed [mm]", 1),
+            ("posed_psnr", "PSNR [dB]", 1)]
+    with open(os.path.join(out, "tab_dynamic.tex"), "w") as f:
+        f.write("\\begin{tabular}{ll" + "r" * len(keys) + "}\n\\toprule\nWind & Method & " + " & ".join(k[1] for k in keys) + " \\\\\n\\midrule\n")
+        for U in Us:
+            for i, m in enumerate(("static3dgs", "dyn3dgs")):
+                cells = []
+                for k, _, p in keys:
+                    mu, sd, nt = mean(m, U, k)
+                    cells.append(f"{mu:.{p}f}" if np.isfinite(mu) else "--")
+                lab = "static 3DGS" if m == "static3dgs" else "deformable 3DGS"
+                f.write(f"{inv.get(U, U) if i == 0 else ''} & {lab} & " + " & ".join(cells) + " \\\\\n")
+            if U != Us[-1]:
+                f.write("\\midrule\n")
+        f.write("\\bottomrule\n\\end{tabular}\n")
+    hi = max(Us)
+    for m, tag in (("static3dgs", "St"), ("dyn3dgs", "Dy")):
+        for k, nm in (("posed_fscore", "PosedF"), ("fscore", "RestF"), ("posed_chamfer_mm", "PosedCD"),
+                      ("posed_centroid_err_mm_median", "PosedCent"), ("posed_psnr", "PSNR")):
+            for U, ul in ((0.0, "Calm"), (hi, "Hi")):
+                v = mean(m, U, k)[0]
+                if np.isfinite(v):
+                    N[f"{tag}{nm}{ul}"] = fmt(v, 3 if "F" in nm and "PSNR" not in nm else 1)
+    N["NDynTrees"] = len({r["tree"] for r in rows})
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--master", default=os.path.join(REPO, "configs", "master.yaml"))
@@ -465,7 +509,11 @@ def main():
     fig_modalities(seqs, a.out)
     fig_wind_motion(m, seqs, a.out, N)
     if a.results:
-        results_assets(load_results(a.results), lv, a.out, N)
+        allrows = load_results(a.results)
+        static_rows = [r for r in allrows if r["method"] not in ("static3dgs", "dyn3dgs")]
+        if static_rows:
+            results_assets(static_rows, lv, a.out, N)
+        dynamic_assets(allrows, lv, a.out, N)
     N.write(os.path.join(a.out, "numbers.tex"))
     print("wrote", a.out, sorted(os.listdir(a.out)))
 
