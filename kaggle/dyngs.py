@@ -170,7 +170,7 @@ def main():
     def render(t, vm, use_deform):
         m, q, s, o, c = gaussians_at(t, use_deform)
         img, alpha, info = rasterization(m, q, s, o, c, vm[None], K[None], W, H, near_plane=0.01, far_plane=100.0,
-                                         backgrounds=bg[None])
+                                         backgrounds=bg[None], packed=False)  # must match strategy packed=False
         return img[0].clamp(0, 1), info
 
     # ---------------------------------------------------------------- training
