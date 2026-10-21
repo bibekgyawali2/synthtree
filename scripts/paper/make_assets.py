@@ -446,7 +446,8 @@ def dynamic_assets(rows, levels, out, N):
     """Static vs deformable 3DGS (same implementation): rest-pose and per-frame posed evaluation."""
     g = lambda r, k: float(r[k]) if r.get(k) not in (None, "") else np.nan  # noqa: E731
     inv = {v: k for k, v in levels.items()}
-    rows = [r for r in rows if r["method"] in ("static3dgs", "dyn3dgs")]
+    dyn = "dyn3dgs" if any(r["method"] == "dyn3dgs" for r in rows) else "dyn3dgsft6"
+    rows = [r for r in rows if r["method"] in ("static3dgs", dyn)]
     if not rows:
         return
     Us = sorted({r["wind_U"] for r in rows})
@@ -465,18 +466,18 @@ def dynamic_assets(rows, levels, out, N):
     with open(os.path.join(out, "tab_dynamic.tex"), "w") as f:
         f.write("\\begin{tabular}{ll" + "r" * len(keys) + "}\n\\toprule\nWind & Method & " + " & ".join(k[1] for k in keys) + " \\\\\n\\midrule\n")
         for U in Us:
-            for i, m in enumerate(("static3dgs", "dyn3dgs")):
+            for i, m in enumerate(("static3dgs", dyn)):
                 cells = []
                 for k, _, p in keys:
                     mu, sd, nt = mean(m, U, k)
                     cells.append(f"{mu:.{p}f}" if np.isfinite(mu) else "--")
-                lab = "static 3DGS" if m == "static3dgs" else "deformable 3DGS"
+                lab = "static 3DGS" if m == "static3dgs" else ("deformable 3DGS" if m == "dyn3dgs" else "deformable 3DGS$^{\\ast}$")
                 f.write(f"{inv.get(U, U) if i == 0 else ''} & {lab} & " + " & ".join(cells) + " \\\\\n")
             if U != Us[-1]:
                 f.write("\\midrule\n")
         f.write("\\bottomrule\n\\end{tabular}\n")
     hi = max(Us)
-    for m, tag in (("static3dgs", "St"), ("dyn3dgs", "Dy")):
+    for m, tag in (("static3dgs", "St"), (dyn, "Dy")):
         for k, nm in (("posed_fscore", "PosedF"), ("fscore", "RestF"), ("posed_chamfer_mm", "PosedCD"),
                       ("posed_centroid_err_mm_median", "PosedCent"), ("posed_psnr", "PSNR")):
             for U, ul in ((0.0, "Calm"), (hi, "Hi")):
@@ -484,6 +485,28 @@ def dynamic_assets(rows, levels, out, N):
                 if np.isfinite(v):
                     N[f"{tag}{nm}{ul}"] = fmt(v, 3 if "F" in nm and "PSNR" not in nm else 1)
     N["NDynTrees"] = len({r["tree"] for r in rows})
+    N["NDynRuns"] = len(rows)
+    # relative over-estimation of wind error by rest-pose evaluation (static 3DGS, strongest wind)
+    rest_hi, posed_hi = mean("static3dgs", hi, "fscore")[0], mean("static3dgs", hi, "posed_fscore")[0]
+    rest_c, posed_c = mean("static3dgs", 0.0, "fscore")[0], mean("static3dgs", 0.0, "posed_fscore")[0]
+    N["StWindDropRest"], N["StWindDropPosed"] = fmt(rest_c - rest_hi, 3), fmt(posed_c - posed_hi, 3)
+    N["StWindDropOverPct"] = fmt(((rest_c - rest_hi) / max(posed_c - posed_hi, 1e-9) - 1) * 100, 0)
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, axs = plt.subplots(1, 2, figsize=(7.2, 2.6))
+    for ax, (k, lab) in zip(axs, (("fscore", "F@5mm vs rest pose"), ("posed_fscore", "F@5mm vs posed leaves"))):
+        for m, col, nm in (("static3dgs", "#e76f51", "static 3DGS"), (dyn, "#264653", "deformable 3DGS" + ("" if dyn == "dyn3dgs" else "*"))):
+            mu = [mean(m, U, k)[0] for U in Us]
+            sd = [mean(m, U, k)[1] for U in Us]
+            ax.errorbar(Us, mu, yerr=sd, marker="o", ms=3, capsize=2, lw=1.2, color=col, label=nm)
+        ax.set_title(lab, fontsize=9)
+        ax.set_xlabel("$U$ [m/s]")
+        ax.grid(alpha=0.3)
+    axs[0].legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "fig_dynamic.pdf"))
 
 
 def main():
@@ -510,7 +533,7 @@ def main():
     fig_wind_motion(m, seqs, a.out, N)
     if a.results:
         allrows = load_results(a.results)
-        static_rows = [r for r in allrows if r["method"] not in ("static3dgs", "dyn3dgs")]
+        static_rows = [r for r in allrows if not r["method"].startswith(("static3dgs", "dyn3dgs"))]
         if static_rows:
             results_assets(static_rows, lv, a.out, N)
         dynamic_assets(allrows, lv, a.out, N)
