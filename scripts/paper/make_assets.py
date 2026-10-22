@@ -296,7 +296,8 @@ def results_assets(rows, levels, out, N):
     g = lambda r, k: float(r[k]) if r.get(k) not in (None, "") else np.nan  # noqa: E731
 
     # ---- per-condition table (mean over seeds, then over trees)
-    keys = [("fscore", "F@5mm", 3, "up"), ("chamfer_mm", "CD [mm]", 1, "dn"), ("centroid_err_mm_median", "Centroid [mm]", 1, "dn"),
+    keys = [("fscore", "F@5mm", 3, "up"), ("precision", "Prec.", 2, "up"), ("recall", "Rec.", 2, "up"),
+            ("chamfer_mm", "CD [mm]", 1, "dn"), ("centroid_err_mm_median", "Centroid [mm]", 1, "dn"),
             ("leaf_area_rel_error", "Area err", 2, "dn"), ("leaf_angle_w1_deg", "Angle W1 [deg]", 1, "dn"),
             ("floater_frac", "Floaters", 2, "dn"), ("psnr", "PSNR [dB]", 1, "up")]
     conds = [(0.0, "clean"), (0.0, "noisy")] + [(u, "noisy") for u in sorted(set(levels.values())) if u > 0] + \
@@ -331,7 +332,7 @@ def results_assets(rows, levels, out, N):
     dec = {met: decompose(rows, met, hb) for met, hb in [("fscore", True), ("chamfer_mm", False), ("centroid_err_mm_median", False)]}
     hi = max(levels.values())
     with open(os.path.join(out, "tab_decomp.tex"), "w") as f:
-        f.write("\\begin{tabular}{llrrr}\n\\toprule\nMethod & Component & $\\Delta$F@5mm & $\\Delta$CD [mm] & $\\Delta$Centroid [mm] \\\\\n\\midrule\n")
+        f.write("\\begin{tabular}{llrrr}\n\\toprule\nMethod & Component & F@5mm drop & CD increase [mm] & Centroid increase [mm] \\\\\n\\midrule\n")
         for m in methods:
             comps = [("method", "0", "Occlusion/method$^{\\dagger}$")] + [("sensor", "0", "Sensor")] + \
                     [("wind", f"{u:g}", f"Wind, $U={u:g}$ m/s") for u in sorted(set(levels.values())) if u > 0] + \
@@ -536,6 +537,85 @@ def dynamic_assets(rows, levels, out, N):
     fig.savefig(os.path.join(out, "fig_dynamic.pdf"))
 
 
+def accounting_and_stats(bench, dyn_rows, out, N, levels, seqs):
+    """Exact run table and the sign-consistency statistics requested in review."""
+    from math import comb
+    g = lambda r, k: float(r[k]) if r.get(k) not in (None, "") else np.nan  # noqa: E731
+    groups = defaultdict(list)
+    for r in bench:
+        groups[("Benchmark", r["method"])].append(r)
+    for r in dyn_rows:
+        groups[("Baseline study", r["method"])].append(r)
+    nice = {"splatfacto": "splatfacto (Nerfstudio)", "depth-nerfacto": "depth-nerfacto (Nerfstudio)",
+            "static3dgs": "static 3DGS (ours, gsplat)", "robust3dgs": "static 3DGS + trimmed loss",
+            "dyn3dgs": "deformable 3DGS (10-band)"}
+    total = 0
+    with open(os.path.join(out, "tab_runs.tex"), "w") as f:
+        f.write("\\begin{tabular}{llllrr}\n\\toprule\nStudy & Method & Trees & Wind $U$ [m/s] per sensor variant & Seeds & Runs \\\\\n\\midrule\n")
+        for (study, m), rs in sorted(groups.items()):
+            trees = sorted({int(r["tree"]) for r in rs})
+            conds = sorted({(r["wind_U"], r["sensor"]) for r in rs})
+            seeds = sorted({r["seed"] for r in rs})
+            per_sensor = defaultdict(list)
+            for U, sn in conds:
+                per_sensor[sn].append(float(U))
+            cond_txt = "; ".join(sn + ": " + ", ".join("calm" if U == 0 else f"{U:g}" for U in sorted(Us))
+                                 for sn, Us in sorted(per_sensor.items(), key=lambda kv: kv[0] != "noisy"))
+            total += len(rs)
+            f.write(f"{study} & {nice.get(m, m)} & {', '.join(map(str, trees))} & {cond_txt} & {len(seeds)} & {len(rs)} \\\\\n")
+        f.write(f"\\midrule\n\\multicolumn{{5}}{{l}}{{Total reported training runs}} & {total} \\\\\n\\bottomrule\n\\end{{tabular}}\n")
+    N["NRunsTotal"] = total
+    N["NRunsBench"] = len(bench)
+    N["NRunsStudy"] = len(dyn_rows)
+
+    # splatfacto: F (noisy) decreases monotonically with U, per tree and seed
+    mono = tot = 0
+    Us = sorted({r["wind_U"] for r in bench})
+    for t in {r["tree"] for r in bench if r["method"] == "splatfacto"}:
+        for sd in {r["seed"] for r in bench if r["method"] == "splatfacto"}:
+            v = [np.nanmean([g(r, "fscore") for r in bench if r["method"] == "splatfacto" and r["tree"] == t and r["seed"] == sd
+                             and r["wind_U"] == U and r["sensor"] == "noisy"]) for U in Us]
+            if all(np.isfinite(v)):
+                tot += 1
+                mono += int(all(a > b for a, b in zip(v, v[1:])))
+    N["SpMonoCount"], N["SpMonoTotal"] = mono, tot
+    # trimmed loss: one-sided sign test over tree x wind conditions
+    if "RbWins" in N.d:
+        k, n = int(N.d["RbWins"]), int(N.d["RbConds"])
+        p = sum(comb(n, i) for i in range(k, n + 1)) / 2 ** n
+        N["RbSignP"] = f"{p:.1e}".replace("e-0", "\\times10^{-").replace("e-", "\\times10^{-") + "}"
+    # static 3DGS: posed F > rest F under wind
+    wins = n = 0
+    for r in dyn_rows:
+        if r["method"] == "static3dgs" and r["wind_U"] > 0:
+            n += 1
+            wins += int(g(r, "posed_fscore") > g(r, "fscore"))
+    N["StPosedBeatsRest"], N["StPosedConds"] = wins, n
+    # per-tree motion vs degradation (splatfacto, noisy, calm -> strongest wind)
+    hi = max(Us)
+    motion = {}
+    for s_ in seqs:
+        p_ = os.path.join(s_["out_dir"], "gt", "leaf_tracks.npz")
+        if s_["kind"] == "orbit" and s_["wind_U"] == hi and os.path.exists(p_):
+            z = np.load(p_)
+            tree = load_tree(os.path.join(s_["tree_dir"], "canonical", "canonical_tree.npz"))
+            motion[str(s_["tree"]["id"])] = float(np.median(np.linalg.norm(z["centroid"] - tree["leaf_centroid"][None], axis=2)) * 1000)
+    pairs = []
+    for t in sorted({r["tree"] for r in bench if r["method"] == "splatfacto"}, key=int):
+        a = np.nanmean([g(r, "fscore") for r in bench if r["method"] == "splatfacto" and r["tree"] == t and r["wind_U"] == 0 and r["sensor"] == "noisy"])
+        b = np.nanmean([g(r, "fscore") for r in bench if r["method"] == "splatfacto" and r["tree"] == t and r["wind_U"] == hi and r["sensor"] == "noisy"])
+        key = str(int(t))
+        if key in motion:
+            pairs.append((key, motion[key], a - b, (a - b) / a))
+    if pairs:
+        N["MotionDropList"] = "; ".join(f"tree {k}: {m:.0f}\\,mm, {d:.2f} ({rel * 100:.0f}\\,\\%)" for k, m, d, rel in pairs)
+        from scipy.stats import spearmanr
+        rho = spearmanr([m for _, m, _, _ in pairs], [d for _, _, d, _ in pairs]).correlation  # absolute F drop
+        N["MotionDropRho"] = fmt(rho, 2)
+        N["MotionDropRhoRel"] = fmt(spearmanr([m for _, m, _, _ in pairs], [rel for _, _, _, rel in pairs]).correlation, 2)
+        N["MotionDropN"] = len(pairs)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--master", default=os.path.join(REPO, "configs", "master.yaml"))
@@ -560,10 +640,12 @@ def main():
     fig_wind_motion(m, seqs, a.out, N)
     if a.results:
         allrows = load_results(a.results)
-        static_rows = [r for r in allrows if not r["method"].startswith(("static3dgs", "dyn3dgs"))]
+        static_rows = [r for r in allrows if not r["method"].startswith(("static3dgs", "dyn3dgs", "robust3dgs"))]
         if static_rows:
             results_assets(static_rows, lv, a.out, N)
         dynamic_assets(allrows, lv, a.out, N)
+        dyn_rows = [r for r in allrows if r["method"].startswith(("static3dgs", "dyn3dgs", "robust3dgs")) and r["method"] != "dyn3dgsft6"]
+        accounting_and_stats(static_rows, dyn_rows, a.out, N, lv, seqs)
     N.write(os.path.join(a.out, "numbers.tex"))
     print("wrote", a.out, sorted(os.listdir(a.out)))
 
