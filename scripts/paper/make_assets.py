@@ -447,7 +447,10 @@ def dynamic_assets(rows, levels, out, N):
     g = lambda r, k: float(r[k]) if r.get(k) not in (None, "") else np.nan  # noqa: E731
     inv = {v: k for k, v in levels.items()}
     dyn = "dyn3dgs" if any(r["method"] == "dyn3dgs" for r in rows) else "dyn3dgsft6"
-    rows = [r for r in rows if r["method"] in ("static3dgs", dyn)]
+    rows = [r for r in rows if r["method"] in ("static3dgs", dyn, "robust3dgs")]
+    methods = [m for m in ("static3dgs", "robust3dgs", dyn) if any(r["method"] == m for r in rows)]
+    labels = {"static3dgs": "static 3DGS", "robust3dgs": "static 3DGS + trimmed loss", "dyn3dgs": "deformable 3DGS",
+              "dyn3dgsft6": "deformable 3DGS$^{\\ast}$"}
     if not rows:
         return
     Us = sorted({r["wind_U"] for r in rows})
@@ -466,12 +469,12 @@ def dynamic_assets(rows, levels, out, N):
     with open(os.path.join(out, "tab_dynamic.tex"), "w") as f:
         f.write("\\begin{tabular}{ll" + "r" * len(keys) + "}\n\\toprule\nWind & Method & " + " & ".join(k[1] for k in keys) + " \\\\\n\\midrule\n")
         for U in Us:
-            for i, m in enumerate(("static3dgs", dyn)):
+            for i, m in enumerate(methods):
                 cells = []
                 for k, _, p in keys:
                     mu, sd, nt = mean(m, U, k)
                     cells.append(f"{mu:.{p}f}" if np.isfinite(mu) else "--")
-                lab = "static 3DGS" if m == "static3dgs" else ("deformable 3DGS" if m == "dyn3dgs" else "deformable 3DGS$^{\\ast}$")
+                lab = labels[m]
                 f.write(f"{inv.get(U, U) if i == 0 else ''} & {lab} & " + " & ".join(cells) + " \\\\\n")
             if U != Us[-1]:
                 f.write("\\midrule\n")
@@ -486,6 +489,23 @@ def dynamic_assets(rows, levels, out, N):
                     N[f"{tag}{nm}{ul}"] = fmt(v, 3 if "F" in nm and "PSNR" not in nm else 1)
     N["NDynTrees"] = len({r["tree"] for r in rows})
     N["NDynRuns"] = len(rows)
+    if "robust3dgs" in methods:
+        for U, ul in ((0.0, "Calm"), (hi, "Hi")):
+            N[f"RbPosedF{ul}"] = fmt(mean("robust3dgs", U, "posed_fscore")[0], 3)
+            N[f"RbGain{ul}"] = fmt(mean("robust3dgs", U, "posed_fscore")[0] - mean("static3dgs", U, "posed_fscore")[0], 3)
+            N[f"RbFloatGain{ul}"] = fmt(mean("static3dgs", U, "floater_frac")[0] - mean("robust3dgs", U, "floater_frac")[0], 3)
+        N["RbWindDrop"] = fmt(mean("robust3dgs", 0.0, "posed_fscore")[0] - mean("robust3dgs", hi, "posed_fscore")[0], 3)
+        N["RbCDGainHi"] = fmt(mean("static3dgs", hi, "posed_chamfer_mm")[0] - mean("robust3dgs", hi, "posed_chamfer_mm")[0], 1)
+        wins = 0
+        tot = 0
+        for t in {r["tree"] for r in rows}:
+            for U in Us:
+                a = [g(r, "posed_fscore") for r in rows if r["method"] == "robust3dgs" and r["tree"] == t and r["wind_U"] == U]
+                b = [g(r, "posed_fscore") for r in rows if r["method"] == "static3dgs" and r["tree"] == t and r["wind_U"] == U]
+                if a and b:
+                    tot += 1
+                    wins += int(np.mean(a) > np.mean(b))
+        N["RbWins"], N["RbConds"] = wins, tot
     offs = [g(r, "deform_offset_mm_median") for r in rows if r["method"] == dyn and np.isfinite(g(r, "deform_offset_mm_median"))]
     p95 = [g(r, "deform_offset_mm_p95") for r in rows if r["method"] == dyn and np.isfinite(g(r, "deform_offset_mm_p95"))]
     if offs:
@@ -503,7 +523,8 @@ def dynamic_assets(rows, levels, out, N):
     import matplotlib.pyplot as plt
     fig, axs = plt.subplots(1, 2, figsize=(7.2, 2.6))
     for ax, (k, lab) in zip(axs, (("fscore", "F@5mm vs rest pose"), ("posed_fscore", "F@5mm vs posed leaves"))):
-        for m, col, nm in (("static3dgs", "#e76f51", "static 3DGS"), (dyn, "#264653", "deformable 3DGS" + ("" if dyn == "dyn3dgs" else "*"))):
+        cols = {"static3dgs": "#e76f51", "robust3dgs": "#e9c46a", "dyn3dgs": "#264653", "dyn3dgsft6": "#264653"}
+        for m, col, nm in ((m, cols[m], labels[m].replace("$^{\\ast}$", "*")) for m in methods):
             mu = [mean(m, U, k)[0] for U in Us]
             sd = [mean(m, U, k)[1] for U in Us]
             ax.errorbar(Us, mu, yerr=sd, marker="o", ms=3, capsize=2, lw=1.2, color=col, label=nm)

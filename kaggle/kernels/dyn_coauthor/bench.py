@@ -8,13 +8,13 @@ import sys
 import threading
 import time
 
-os.environ.setdefault("DYN_SMOKE", "0")  # full run: the 16 deformable runs
+os.environ.setdefault("DYN_SMOKE", "0")  # "1" = 2-run smoke test
 REPO_URL = "https://github.com/bibekgyawali2/synthtree.git"
 WORK = "/kaggle/working"
 CODE = f"{WORK}/synthtree"
-# re-run of the 16 deformable runs with the fixed time encoding (static results from the previous job stay valid)
+# mitigation: static 3DGS with a trimmed photometric loss, same 16 conditions as static/deformable (~1.5 h on 2x T4)
 STAGES = (["--trees 1 --runs high:noisy --iters 600 --warmup 200 --eval-frames 2"] if os.environ.get("DYN_SMOKE") == "1" else
-          ["--trees 1 3 5 7 --runs calm:noisy low:noisy medium:noisy high:noisy --modes deform --iters 10000 --warmup 2000"])
+          ["--trees 1 3 5 7 --runs calm:noisy low:noisy medium:noisy high:noisy --modes robust --iters 10000 --warmup 2000"])
 
 
 def sh(cmd):

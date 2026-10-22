@@ -1,6 +1,6 @@
 {
-  "id": "bibekgyawali/synthtree-dyn-rerun",
-  "title": "synthtree-dyn-rerun",
+  "id": "bibekgyawali/synthtree-mitigation",
+  "title": "synthtree-mitigation",
   "code_file": "bench.py",
   "language": "python",
   "kernel_type": "script",
