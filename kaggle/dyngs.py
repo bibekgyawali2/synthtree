@@ -5,6 +5,7 @@
         --variant noisy --mode deform --out results/dyn3dgs__tree_01__high__noisy__s0__geom.json
 
 --mode static : plain 3DGS (same code path, no deformation) - the controlled baseline
+--mode robust : static 3DGS with a trimmed L1 loss (top 20 % residual pixels ignored) - mitigation
 --mode deform : canonical Gaussians + time-conditioned MLP predicting per-Gaussian offsets of
                 position, rotation and scale (in the spirit of Deformable 3D Gaussians, Yang et
                 al., CVPR 2024); deformation is switched on after a static warm-up.
@@ -67,7 +68,10 @@ def main():
     ap.add_argument("--seq", required=True)
     ap.add_argument("--tree-dir", required=True)
     ap.add_argument("--variant", default="noisy", choices=["clean", "noisy"])
-    ap.add_argument("--mode", default="deform", choices=["static", "deform"])
+    ap.add_argument("--mode", default="deform", choices=["static", "deform", "robust"],
+                    help="robust: static 3DGS with a trimmed photometric loss (mitigation)")
+    ap.add_argument("--trim", type=float, default=0.2,
+                    help="robust mode: fraction of highest-residual pixels ignored in the L1 term")
     ap.add_argument("--iters", type=int, default=15000)
     ap.add_argument("--warmup", type=int, default=3000, help="static iterations before deformation (deform mode)")
     ap.add_argument("--seed", type=int, default=0)
@@ -183,7 +187,17 @@ def main():
         img, info = render(tr_t[k], tr_vm[k], use_def)
         strategy.step_pre_backward(params, optimizers, state, step, info)
         gt = tr_img[k]
-        l1 = (img - gt).abs().mean()
+        res = (img - gt).abs()
+        if a.mode == "robust" and step >= 1000:
+            # trimmed L1 (in the spirit of RobustNeRF): pixels whose residual is in the top `trim`
+            # fraction - mostly moving leaves the static model cannot explain - are ignored, so they
+            # do not pull Gaussians into blurred, floater-prone compromises.
+            r = res.mean(-1).detach()
+            thr = torch.quantile(r.flatten()[torch.randint(r.numel(), (65536,), device=r.device)], 1 - a.trim)
+            keep = (r <= thr).float()[..., None]
+            l1 = (res * keep).sum() / (keep.sum() * 3).clamp_min(1)
+        else:
+            l1 = res.mean()
         ss = ssim_torch(img.permute(2, 0, 1)[None], gt.permute(2, 0, 1)[None], torch, F)
         loss = 0.8 * l1 + 0.2 * (1 - ss)
         loss.backward()
