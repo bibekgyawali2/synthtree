@@ -102,7 +102,9 @@ def one_run(a, M, method, iters, tid, level, variant, seed, name, root, res_dir,
     g = json.load(open(geom_json))
     print(f"  done in {(time.time() - t0) / 60:.1f} min: F={g['fscore']:.3f} chamfer={g['chamfer_mm']:.1f} mm "
           f"floaters={g['floater_frac']:.2f}", flush=True)
-    if not a.keep:
+    if a.keep:  # converted images are re-creatable from the dataset; keep only the model and export
+        shutil.rmtree(data, ignore_errors=True)
+    else:
         for d in (runs, export, data):
             shutil.rmtree(d, ignore_errors=True)
     return g
@@ -118,7 +120,7 @@ def main():
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
     ap.add_argument("--iters", type=int, default=None, help="override the per-method default iterations")
     ap.add_argument("--init-ply", default="auto", help="auto = same depth variant as the images; or clean/noisy/none")
-    ap.add_argument("--keep", action="store_true", help="keep trained models and exports")
+    ap.add_argument("--keep", action="store_true", help="keep trained models (checkpoint + config) and exports")
     ap.add_argument("--shard", type=int, default=0, help="this worker's index (use one worker per GPU)")
     ap.add_argument("--num-shards", type=int, default=1, help="number of parallel workers")
     ap.add_argument("--dry-run", action="store_true")
