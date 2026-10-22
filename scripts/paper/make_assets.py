@@ -486,6 +486,12 @@ def dynamic_assets(rows, levels, out, N):
                     N[f"{tag}{nm}{ul}"] = fmt(v, 3 if "F" in nm and "PSNR" not in nm else 1)
     N["NDynTrees"] = len({r["tree"] for r in rows})
     N["NDynRuns"] = len(rows)
+    offs = [g(r, "deform_offset_mm_median") for r in rows if r["method"] == dyn and np.isfinite(g(r, "deform_offset_mm_median"))]
+    p95 = [g(r, "deform_offset_mm_p95") for r in rows if r["method"] == dyn and np.isfinite(g(r, "deform_offset_mm_p95"))]
+    if offs:
+        N["DyOffMin"], N["DyOffMax"] = fmt(min(offs), 1), fmt(max(offs), 1)
+        N["DyOffRatio"] = fmt(float(np.mean(np.array(p95) / np.maximum(np.array(offs), 1e-9))), 2)
+        N["DyOffCalm"], N["DyOffHi"] = fmt(mean(dyn, 0.0, "deform_offset_mm_median")[0], 1), fmt(mean(dyn, hi, "deform_offset_mm_median")[0], 1)
     # relative over-estimation of wind error by rest-pose evaluation (static 3DGS, strongest wind)
     rest_hi, posed_hi = mean("static3dgs", hi, "fscore")[0], mean("static3dgs", hi, "posed_fscore")[0]
     rest_c, posed_c = mean("static3dgs", 0.0, "fscore")[0], mean("static3dgs", 0.0, "posed_fscore")[0]
