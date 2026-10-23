@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SynthTree Wind Demo</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1f1c; --muted: #6b6f68; --line: #dedcd4;
+    --accent: #2f6b3a; --accent-soft: #e3eee2; --warn: #a3471f; --view: radial-gradient(ellipse at 50% 35%, #f4f4ef 0%, #c9ccc2 100%);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121411; --panel: #1b1e1a; --ink: #e8e9e4; --muted: #9a9e96; --line: #2d312b;
+      --accent: #8cc58f; --accent-soft: #233226; --warn: #e3946d; --view: radial-gradient(ellipse at 50% 35%, #d9dbd3 0%, #9fa398 100%);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 20px 24px 8px; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); max-width: 900px; }
+  main { max-width: 1400px; margin: 0 auto; padding: 8px 24px 32px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; align-items: end; padding: 14px 0; }
+  .group label { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase;
+                 letter-spacing: 0.05em; margin-bottom: 4px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); }
+  .seg button { border: 0; background: none; color: var(--ink); padding: 7px 12px; font: inherit; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--ink); }
+  .check { display: flex; gap: 6px; align-items: center; color: var(--ink); }
+  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .pane-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px;
+               border-bottom: 1px solid var(--line); gap: 8px; flex-wrap: wrap; }
+  .pane-head strong { font-size: 15px; }
+  .view { position: relative; height: 56vh; min-height: 340px; background: var(--view); }
+  .view .hint { position: absolute; left: 10px; bottom: 8px; color: #3c4039; font-size: 12px;
+                pointer-events: none; opacity: 0.8; z-index: 2; }
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); }
+  .metric { background: var(--panel); padding: 9px 12px; }
+  .metric .k { font-size: 12px; color: var(--muted); }
+  .metric .v { font-size: 18px; font-variant-numeric: tabular-nums; }
+  .metric .d { font-size: 12px; font-variant-numeric: tabular-nums; }
+  .worse { color: var(--warn); } .better { color: var(--accent); }
+  .below { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; margin-top: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .card h2 { font-size: 15px; margin: 0 0 8px; }
+  .card p, .card li { color: var(--muted); margin: 0 0 6px; }
+  .card ul { padding-left: 18px; margin: 0; }
+  svg text { fill: var(--muted); font-size: 11px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  @media (max-width: 900px) {
+    header, main { padding-left: 16px; padding-right: 16px; }
+    .panes, .below { grid-template-columns: 1fr; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    .view { height: 46vh; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "@mkkellogg/gaussian-splats-3d": "https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.js"
+} }
+</script>
+</head>
+<body>
+<header>
+  <h1>SynthTree: what wind does to a 3D Gaussian Splatting reconstruction</h1>
+  <p>Each view is a splatfacto (3DGS) model trained on a synthetic RGB-D orbit of the same sapling, with the same camera path. Only the wind speed and the sensor noise differ. Drag to orbit, scroll to zoom; the right view follows the left one.</p>
+</header>
+<main>
+  <div class="controls">
+    <div class="group"><label>Tree</label><div class="seg" id="tree"></div></div>
+    <div class="group"><label>Seed</label><div class="seg" id="seed"></div></div>
+    <div class="group"><label>Left view</label><select id="condA"></select></div>
+    <div class="group"><label>Right view</label><select id="condB"></select></div>
+    <div class="group"><label>Show</label><div class="seg" id="crop"></div></div>
+    <label class="check"><input type="checkbox" id="sync" checked> Sync cameras</label>
+  </div>
+
+  <div class="panes">
+    <section class="pane" id="paneA">
+      <div class="pane-head"><strong data-title></strong><span class="note" data-sub></span></div>
+      <div class="view" data-view><span class="hint">drag: orbit · right-drag: pan · scroll: zoom</span></div>
+      <div class="metrics" data-metrics></div>
+    </section>
+    <section class="pane" id="paneB">
+      <div class="pane-head"><strong data-title></strong><span class="note" data-sub></span></div>
+      <div class="view" data-view><span class="hint" data-hintb>camera follows the left view</span></div>
+      <div class="metrics" data-metrics></div>
+    </section>
+  </div>
+
+  <div class="below">
+    <div class="card">
+      <h2>Leaf F-score vs wind speed (noisy sensor, this tree)</h2>
+      <svg id="chart" viewBox="0 0 560 220" width="100%" role="img" aria-label="F-score versus wind speed"></svg>
+      <p class="note">Dots: individual seeds; line: mean. F-score at 5 mm against the ground-truth leaf surface (higher is better).</p>
+    </div>
+    <div class="card">
+      <h2>What to look for</h2>
+      <ul>
+        <li>In calm air the leaves are sharp, separate splats. In wind the static model averages the moving leaves into a larger, blurrier canopy.</li>
+        <li>The images still look plausible (PSNR drops only a few %), but the geometry does not: F-score falls sharply and the per-leaf centroid error grows.</li>
+        <li>Sensor noise mainly gives fewer, larger Gaussians: coverage (recall) goes up, precision does not.</li>
+      </ul>
+      <p class="note" id="info"></p>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import * as GS from "@mkkellogg/gaussian-splats-3d";
+
+const LEVEL_TXT = { calm: "calm", low: "1.5 m/s", medium: "3 m/s", high: "5 m/s" };
+const manifest = await (await fetch("manifest.json")).json();
+const runs = manifest.runs;
+const state = { tree: null, seed: 0, condA: "calm__noisy", condB: "high__noisy", crop: "tree", sync: true };
+const qs = new URLSearchParams(location.search);  // e.g. ?tree=3&seed=1&a=calm__clean&b=high__clean&show=full
+
+const trees = [...new Set(runs.map(r => r.tree))].sort((a, b) => a - b);
+state.tree = trees.includes(+qs.get("tree")) ? +qs.get("tree") : trees[0];
+if (qs.has("seed")) state.seed = +qs.get("seed");
+if (qs.has("a")) state.condA = qs.get("a");
+if (qs.has("b")) state.condB = qs.get("b");
+if (qs.get("show") === "full") state.crop = "full";
+const conds = ["calm__clean", "calm__noisy", "low__noisy", "medium__noisy", "high__noisy", "high__clean"];
+const condTxt = c => { const [l, s] = c.split("__"); return `${LEVEL_TXT[l]} · ${s} sensor`; };
+const find = (tree, seed, cond) => runs.find(r => r.tree === tree && r.seed === seed && `${r.level}__${r.sensor}` === cond);
+
+function seg(id, items, key, fmt) {
+  const el = document.getElementById(id);
+  el.innerHTML = "";
+  for (const it of items) {
+    const b = document.createElement("button");
+    b.textContent = fmt(it);
+    b.setAttribute("aria-pressed", String(state[key] === it));
+    b.onclick = () => { state[key] = it; render(); };
+    el.appendChild(b);
+  }
+}
+for (const id of ["condA", "condB"]) {
+  const s = document.getElementById(id);
+  s.innerHTML = conds.map(c => `<option value="${c}">${condTxt(c)}</option>`).join("");
+  s.onchange = () => { state[id] = s.value; render(); };
+}
+document.getElementById("sync").onchange = e => { state.sync = e.target.checked; applySync(); };
+
+// ---- viewers ---------------------------------------------------------------
+const panes = { A: document.getElementById("paneA"), B: document.getElementById("paneB") };
+const viewers = { A: null, B: null };
+const loaded = { A: null, B: null };
+let token = 0;
+
+async function makeViewer(key, url, camState) {
+  const root = panes[key].querySelector("[data-view]");
+  if (viewers[key]) { const old = viewers[key]; viewers[key] = null; try { await old.dispose(); } catch (e) {} }
+  root.querySelectorAll("canvas, .loaderContainer, div:not(.hint)").forEach(n => { if (!n.classList.contains("hint")) n.remove(); });
+  const v = new GS.Viewer({
+    rootElement: root,
+    cameraUp: [0, 0, 1],
+    initialCameraPosition: camState ? camState.pos : [1.25, -1.25, 1.15],
+    initialCameraLookAt: camState ? camState.target : [0, 0, 0.72],
+    sharedMemoryForWorkers: false,
+    gpuAcceleratedSort: false,
+    sphericalHarmonicsDegree: 0,
+  });
+  viewers[key] = v;
+  await v.addSplatScene(url, { format: GS.SceneFormat.Splat, showLoadingUI: true, progressiveLoad: false, splatAlphaRemovalThreshold: 5 });
+  v.start();
+  return v;
+}
+function camOf(v) {
+  if (!v || !v.camera || !v.controls) return null;
+  return { pos: v.camera.position.toArray(), target: v.controls.target.toArray() };
+}
+function applySync() {
+  const b = viewers.B;
+  if (b && b.controls) b.controls.enabled = !state.sync;
+  panes.B.querySelector("[data-hintb]").textContent = state.sync ? "camera follows the left view" : "drag: orbit · right-drag: pan · scroll: zoom";
+}
+(function follow() {
+  const a = viewers.A, b = viewers.B;
+  if (state.sync && a && b && a.camera && b.camera && a.controls && b.controls) {
+    b.camera.position.copy(a.camera.position);
+    b.camera.quaternion.copy(a.camera.quaternion);
+    b.controls.target.copy(a.controls.target);
+  }
+  requestAnimationFrame(follow);
+})();
+
+// ---- metrics ---------------------------------------------------------------
+const M = [
+  ["fscore", "F-score @5mm", 3, +1], ["precision", "Precision", 2, +1], ["recall", "Recall", 2, +1],
+  ["chamfer_mm", "Chamfer [mm]", 1, -1], ["centroid_err_mm_median", "Leaf centroid err [mm]", 1, -1],
+  ["psnr", "PSNR [dB]", 1, +1], ["floater_frac", "Floaters", 2, -1], ["gaussians", "Gaussians", 0, 0],
+];
+function metricsHTML(r, ref) {
+  return M.map(([k, label, dp, dir]) => {
+    const val = k === "gaussians" ? r.gaussians : r.metrics[k];
+    const rv = ref ? (k === "gaussians" ? ref.gaussians : ref.metrics[k]) : null;
+    let d = "";
+    if (ref && val != null && rv != null && dir !== 0 && r !== ref) {
+      const diff = val - rv, cls = diff * dir < 0 ? "worse" : "better";
+      d = `<div class="d ${cls}">${diff >= 0 ? "+" : ""}${diff.toFixed(dp)} vs left</div>`;
+    }
+    const txt = val == null ? "–" : (k === "gaussians" ? val.toLocaleString() : val.toFixed(dp));
+    return `<div class="metric"><div class="k">${label}</div><div class="v">${txt}</div>${d}</div>`;
+  }).join("");
+}
+
+function chart() {
+  const svg = document.getElementById("chart");
+  const W = 560, H = 220, L = 44, R = 16, T = 12, B = 34;
+  const Us = [0, 1.5, 3, 5], lv = ["calm", "low", "medium", "high"];
+  const x = u => L + (u / 5) * (W - L - R), y = f => T + (1 - f / 0.7) * (H - T - B);
+  let s = "";
+  for (const f of [0, 0.2, 0.4, 0.6]) s += `<line x1="${L}" x2="${W - R}" y1="${y(f)}" y2="${y(f)}" stroke="var(--line)"/><text x="${L - 8}" y="${y(f) + 4}" text-anchor="end">${f.toFixed(1)}</text>`;
+  Us.forEach(u => s += `<text x="${x(u)}" y="${H - 12}" text-anchor="middle">${u === 0 ? "calm" : u + " m/s"}</text>`);
+  const means = [];
+  lv.forEach((l, i) => {
+    const pts = runs.filter(r => r.tree === state.tree && r.level === l && r.sensor === "noisy" && r.metrics.fscore != null);
+    pts.forEach(r => s += `<circle cx="${x(Us[i]) + (r.seed ? 5 : -5)}" cy="${y(r.metrics.fscore)}" r="3.5" fill="var(--accent)" opacity="0.45"/>`);
+    if (pts.length) means.push([Us[i], pts.reduce((a, r) => a + r.metrics.fscore, 0) / pts.length]);
+  });
+  if (means.length > 1) s += `<polyline fill="none" stroke="var(--accent)" stroke-width="2" points="${means.map(([u, f]) => `${x(u)},${y(f)}`).join(" ")}"/>`;
+  means.forEach(([u, f]) => s += `<circle cx="${x(u)}" cy="${y(f)}" r="4.5" fill="var(--accent)"/><text x="${x(u) + 8}" y="${y(f) - 7}">${f.toFixed(2)}</text>`);
+  svg.innerHTML = s;
+}
+
+// ---- render ----------------------------------------------------------------
+async function render() {
+  seg("tree", trees, "tree", t => `Tree ${t} · ${runs.find(r => r.tree === t).leaf}`);
+  seg("seed", [0, 1], "seed", s => `${s}`);
+  seg("crop", ["tree", "full"], "crop", c => c === "tree" ? "Tree only" : "Full scene");
+  document.getElementById("condA").value = state.condA;
+  document.getElementById("condB").value = state.condB;
+  chart();
+  history.replaceState(null, "", `?tree=${state.tree}&seed=${state.seed}&a=${state.condA}&b=${state.condB}&show=${state.crop}`);
+
+  const my = ++token;
+  const rA = find(state.tree, state.seed, state.condA), rB = find(state.tree, state.seed, state.condB);
+  const keep = camOf(viewers.A);
+  for (const [key, r] of [["A", rA], ["B", rB]]) {
+    const p = panes[key];
+    p.querySelector("[data-title]").textContent = r ? condTxt(state[`cond${key}`]) : "not available yet";
+    p.querySelector("[data-sub]").textContent = r ? `tree ${r.tree} (${r.leaf}) · seed ${r.seed} · ${(r.params / 1e6).toFixed(2)} M parameters` : "";
+    p.querySelector("[data-metrics]").innerHTML = r ? metricsHTML(r, key === "B" ? rA : null) : "";
+  }
+  const src = [...new Set([rA, rB].filter(Boolean).map(r => r.metrics_source))].join(", ");
+  document.getElementById("info").textContent =
+    `${runs.length} models loaded. "Tree only" crops to ${manifest.crop_radius_m} m around the pot; colours use the base (view-independent) term only. Metrics: ${src || "n/a"}.`;
+  for (const [key, r] of [["A", rA], ["B", rB]]) {
+    const url = r ? `splats/${r.name}${state.crop === "tree" ? ".tree" : ""}.splat` : null;
+    if (url === loaded[key]) continue;
+    loaded[key] = url;
+    if (!url) continue;
+    try { await makeViewer(key, url, keep); } catch (e) { console.error(e); }
+    if (my !== token) return;
+  }
+  applySync();
+}
+render();
+</script>
+</body>
+</html>

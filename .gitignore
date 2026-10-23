@@ -7,3 +7,5 @@ logs/
 *.blend1
 .venv-kaggle/
 
+web/splats/
+web/manifest.json
