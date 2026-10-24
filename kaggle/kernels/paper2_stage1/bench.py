@@ -17,10 +17,10 @@ BRANCH = "saurav"
 WORK = "/kaggle/working"
 CODE = f"{WORK}/synthtree"
 COMMON = "--dataset synthtree-v2-stage1 --runs calm:noisy high:noisy --modes static deform --train-strides 1 4"
-# 32 runs x ~26 min / 2 GPUs ~ 7 h (paper-1 settings: 15k iterations, 3k static warm-up)
+# 32 runs x ~26 min / 2 GPUs ~ 7 h (paper-1 settings: 10k iterations, 2k static warm-up = 8k deformation)
 STAGES = ([f"{COMMON} --trees 1 --runs high:noisy --modes deform --iters 600 --warmup 200 --eval-frames 2"]
           if os.environ.get("DYN_SMOKE") == "1" else
-          [f"{COMMON} --trees 1 4 5 7 --iters 15000 --warmup 3000"])
+          [f"{COMMON} --trees 1 4 5 7 --iters 10000 --warmup 2000"])
 
 
 def sh(cmd):
