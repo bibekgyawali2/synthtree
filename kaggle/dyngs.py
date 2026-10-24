@@ -76,6 +76,10 @@ def main():
     ap.add_argument("--warmup", type=int, default=3000, help="static iterations before deformation (deform mode)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--eval-frames", type=int, default=4)
+    ap.add_argument("--train-stride", type=int, default=1,
+                    help="train on every k-th video frame only (4 on a 30 fps sequence = 7.5 fps); test views unchanged")
+    ap.add_argument("--train-offset", type=int, default=2,
+                    help="phase of the stride; 2 keeps 7.5 fps frames off the every-8th-frame test views")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
 
@@ -97,6 +101,9 @@ def main():
     # ---------------------------------------------------------------- data
     tr = SynthTreeSequence(a.seq, variant=a.variant, split="train", load=("rgb",), with_leaf_gt=False)
     te = SynthTreeSequence(a.seq, variant=a.variant, split="test", load=("rgb",), with_leaf_gt=True)
+    if a.train_stride > 1:  # lower temporal sampling from the same renders (sampling-vs-modelling study)
+        tr.frames = [i for i in tr.frames if i % a.train_stride == a.train_offset % a.train_stride]
+        assert tr.frames and not set(tr.frames) & set(te.frames), "strided train frames overlap the test views"
     H, W = tr.height, tr.width
     K = torch.tensor(tr.K, device=dev, dtype=torch.float32)
     tmax = max(float(tr.times.max()), 1e-6)
@@ -259,6 +266,7 @@ def main():
         out["deform_offset_mm_median"] = float(mags.median()) * 1000
         out["deform_offset_mm_p95"] = float(torch.quantile(mags[torch.randperm(len(mags))[:100000]], 0.95)) * 1000
     out.update({"mode": a.mode, "variant": a.variant, "iters": a.iters, "n_gaussians": int(len(params["means"])),
+                "train_stride": a.train_stride, "n_train_views": len(tr_img),
                 "seconds": round(time.time() - t_start, 1)})
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     json.dump(out, open(a.out, "w"), indent=1)

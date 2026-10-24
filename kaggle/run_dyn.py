@@ -22,6 +22,9 @@ def main():
     ap.add_argument("--runs", nargs="+", default=["calm:noisy", "low:noisy", "medium:noisy", "high:noisy"])
     ap.add_argument("--modes", nargs="+", default=["static", "deform"])
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
+    ap.add_argument("--train-strides", type=int, nargs="+", default=[1],
+                    help="temporal subsampling of the training frames (4 on 30 fps data = 7.5 fps); "
+                         "k > 1 is tagged into the method name as _st<k>")
     ap.add_argument("--iters", type=int, default=15000)
     ap.add_argument("--warmup", type=int, default=3000)
     ap.add_argument("--eval-frames", type=int, default=4)
@@ -34,11 +37,12 @@ def main():
     root = synthtree_dataset.find_dataset_root(a.dataset)
     res = os.path.join(a.work, "results")
     os.makedirs(res, exist_ok=True)
-    jobs = [(m, t, r, s) for t in a.trees for r in a.runs for m in a.modes for s in a.seeds][a.shard::a.num_shards]
+    jobs = [(m, t, r, s, k) for t in a.trees for r in a.runs for m in a.modes for s in a.seeds
+            for k in a.train_strides][a.shard::a.num_shards]
     print(f"worker {a.shard}/{a.num_shards}: {len(jobs)} runs", flush=True)
-    for mode, tid, run, seed in jobs:
+    for mode, tid, run, seed, stride in jobs:
         level, variant = run.split(":")
-        name = f"{NAMES[mode]}__tree_{tid:02d}__{level}__{variant}__s{seed}"
+        name = f"{NAMES[mode]}{f'_st{stride}' if stride > 1 else ''}__tree_{tid:02d}__{level}__{variant}__s{seed}"
         out = os.path.join(res, name + "__geom.json")
         if os.path.exists(out):
             print(f"[skip] {name}", flush=True)
@@ -46,7 +50,7 @@ def main():
         log = os.path.join(res, name + ".log")
         cmd = (f"python {HERE}/dyngs.py --seq {root}/tree_{tid:02d}/wind_{level} --tree-dir {root}/trees/tree_{tid:02d} "
                f"--variant {variant} --mode {mode} --iters {a.iters} --warmup {a.warmup} --seed {seed} "
-               f"--eval-frames {a.eval_frames} --out {out}")
+               f"--eval-frames {a.eval_frames} --train-stride {stride} --out {out}")
         print(f"[run ] {name}", flush=True)
         t0 = time.time()
         with open(log, "w") as f:
