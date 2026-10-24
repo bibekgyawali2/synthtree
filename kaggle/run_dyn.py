@@ -13,7 +13,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-NAMES = {"static": "static3dgs", "deform": "dyn3dgs", "robust": "robust3dgs"}
+NAMES = {"static": "static3dgs", "deform": "dyn3dgs", "robust": "robust3dgs", "cluster": "cluster3dgs"}
 
 
 def main():

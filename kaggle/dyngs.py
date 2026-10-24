@@ -9,6 +9,10 @@
 --mode deform : canonical Gaussians + time-conditioned MLP predicting per-Gaussian offsets of
                 position, rotation and scale (in the spirit of Deformable 3D Gaussians, Yang et
                 al., CVPR 2024); deformation is switched on after a static warm-up.
+--mode cluster: canonical Gaussians moved by per-cluster rigid motion: k-means cells of the warm-up
+                Gaussians at branch and leaf scale, each with its own SE(3) trajectory (Fourier series
+                in time up to --f-max Hz, unlocked coarse-to-fine). Independent cells cannot collapse
+                into one smooth global shift the way an MLP(x, t) can.
 Both modes share initialisation (back-projected depth of the same variant), losses
 (0.8 L1 + 0.2 D-SSIM), densification (gsplat DefaultStrategy), background colour and iterations.
 
@@ -68,7 +72,7 @@ def main():
     ap.add_argument("--seq", required=True)
     ap.add_argument("--tree-dir", required=True)
     ap.add_argument("--variant", default="noisy", choices=["clean", "noisy"])
-    ap.add_argument("--mode", default="deform", choices=["static", "deform", "robust"],
+    ap.add_argument("--mode", default="deform", choices=["static", "deform", "robust", "cluster"],
                     help="robust: static 3DGS with a trimmed photometric loss (mitigation)")
     ap.add_argument("--trim", type=float, default=0.2,
                     help="robust mode: fraction of highest-residual pixels ignored in the L1 term")
@@ -80,6 +84,15 @@ def main():
                     help="train on every k-th video frame only (4 on a 30 fps sequence = 7.5 fps); test views unchanged")
     ap.add_argument("--train-offset", type=int, default=2,
                     help="phase of the stride; 2 keeps 7.5 fps frames off the every-8th-frame test views")
+    ap.add_argument("--leaf-clusters", type=int, default=2048, help="cluster mode: fine (leaf-scale) cells")
+    ap.add_argument("--branch-clusters", type=int, default=32, help="cluster mode: coarse (branch-scale) cells")
+    ap.add_argument("--f-max", type=float, default=10.0, help="cluster mode: highest motion frequency, Hz")
+    ap.add_argument("--lam-leaf", type=float, default=0.1, help="cluster mode: acceleration penalty, leaf cells")
+    ap.add_argument("--lam-branch", type=float, default=1.0, help="cluster mode: acceleration penalty, branch cells")
+    ap.add_argument("--lam-amp", type=float, default=0.01, help="cluster mode: motion amplitude penalty")
+    ap.add_argument("--motion-lr", type=float, default=2e-5,
+                    help="cluster mode: Adam lr of the Fourier coefficients; Adam moves all ~2J coefficients by ~lr "
+                         "per step and they add coherently at a given time, so this must be ~1e-3 / (2J)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
 
@@ -171,6 +184,77 @@ def main():
 
     deform = Deform().to(dev) if a.mode == "deform" else None
     opt_def = torch.optim.Adam(deform.parameters(), lr=8e-4) if deform is not None else None
+    has_motion = a.mode in ("deform", "cluster")
+
+    # ---------------------------------------------------------------- cluster motion bases
+    def nearest(x, c, chunk=65536):
+        return torch.cat([torch.cdist(x[i:i + chunk], c).argmin(1) for i in range(0, len(x), chunk)])
+
+    def kmeans(x, k, iters=15):
+        c = x[torch.randperm(len(x), device=x.device)[:k]].clone()
+        for _ in range(iters):
+            lab = nearest(x, c)
+            cnt = torch.bincount(lab, minlength=len(c)).float()[:, None]
+            s = torch.zeros_like(c).index_add_(0, lab, x)
+            c = torch.where(cnt > 0, s / cnt.clamp_min(1), c)  # empty cells keep their old centre
+        return c
+
+    def so3_exp(w):  # (K,3) axis-angle -> (K,3,3); Taylor branch keeps gradients finite at w = 0
+        th2 = (w * w).sum(-1, keepdim=True)[..., None]
+        th = torch.sqrt(th2 + 1e-12)
+        A = torch.where(th2 < 1e-6, 1 - th2 / 6, torch.sin(th) / th)
+        B = torch.where(th2 < 1e-6, 0.5 - th2 / 24, (1 - torch.cos(th)) / th2.clamp_min(1e-12))
+        Wx = torch.zeros(len(w), 3, 3, device=w.device)
+        Wx[:, 0, 1], Wx[:, 0, 2], Wx[:, 1, 2] = -w[:, 2], w[:, 1], -w[:, 0]
+        Wx = Wx - Wx.transpose(1, 2)
+        return torch.eye(3, device=w.device) + A * Wx + B * (Wx @ Wx)
+
+    def rotmat_to_quat(R):  # wxyz; motions stay well below 180 deg, so w > 0 is safe
+        w = torch.sqrt((1 + R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]).clamp_min(1e-8)) / 2
+        return torch.stack([w, (R[:, 2, 1] - R[:, 1, 2]) / (4 * w), (R[:, 0, 2] - R[:, 2, 0]) / (4 * w),
+                            (R[:, 1, 0] - R[:, 0, 1]) / (4 * w)], -1)
+
+    def quat_mul(p, q):
+        pw, px, py, pz = p.unbind(-1)
+        qw, qx, qy, qz = q.unbind(-1)
+        return torch.stack([pw * qw - px * qx - py * qy - pz * qz, pw * qx + px * qw + py * qz - pz * qy,
+                            pw * qy - px * qz + py * qw + pz * qx, pw * qz + px * qy - py * qx + pz * qw], -1)
+
+    class ClusterMotion(torch.nn.Module):
+        # Per-cell SE(3) trajectories x -> R (x - p) + p + v, with (rotation vector, v) a Fourier series in
+        # seconds on a 1/(2T) grid (no wrap-around over the orbit) up to f_max. No DC term: the canonical
+        # Gaussians are the time-average pose. Frequencies are unlocked coarse-to-fine through f_cut.
+        TRANS_SCALE = 0.05  # metres per unit coefficient, so rotation and translation share one learning rate
+
+        def __init__(self, c_branch, c_leaf, T_seq, f_max):
+            super().__init__()
+            J = max(1, int(round(f_max * 2 * T_seq)))
+            f = torch.arange(1, J + 1, device=c_leaf.device, dtype=torch.float32) / (2 * T_seq)
+            self.register_buffer("f", f)
+            self.register_buffer("w4", ((f / f_max) ** 4).repeat(2))  # Sobolev weights ~ acceleration energy
+            self.register_buffer("c_branch", c_branch)
+            self.register_buffer("c_leaf", c_leaf)
+            self.f_max, self.f_cut = f_max, 0.5
+            self.pb = torch.nn.Parameter(c_branch.clone())
+            self.pl = torch.nn.Parameter(c_leaf.clone())
+            self.coef_b = torch.nn.Parameter(torch.zeros(len(c_branch), 6, 2 * J, device=f.device))
+            self.coef_l = torch.nn.Parameter(torch.zeros(len(c_leaf), 6, 2 * J, device=f.device))
+
+        def basis(self, t_sec):
+            w = 0.5 - 0.5 * torch.cos(math.pi * ((self.f_cut - self.f) / 1.0 + 1).clamp(0, 1))  # 1 Hz cosine ramp
+            ph = 2 * math.pi * self.f * t_sec
+            return torch.cat([w * torch.cos(ph), w * torch.sin(ph)])
+
+        def se3(self, coef, piv, bas):  # -> R (K,3,3), t (K,3) with x -> R x + t
+            xi = coef @ bas
+            R = so3_exp(xi[:, :3])
+            return R, piv + self.TRANS_SCALE * xi[:, 3:] - torch.einsum("kij,kj->ki", R, piv)
+
+        def sobolev(self, coef):
+            return (coef.pow(2) * self.w4).sum(-1).mean()
+
+    motion = None
+    cells = {"n": -1, "bid": None, "lid": None}  # Gaussian -> cell, recomputed after densification
 
     def gaussians_at(t, use_deform):
         m, q, s = params["means"], params["quats"], params["scales"]
@@ -179,6 +263,16 @@ def main():
             m = m + dx
             q = q + dq
             s = s + ds
+        if use_deform and motion is not None:
+            if cells["n"] != len(m):
+                with torch.no_grad():
+                    cells.update(n=len(m), bid=nearest(m, motion.c_branch), lid=nearest(m, motion.c_leaf))
+            bas = motion.basis(t * tmax)
+            Rb, tb = motion.se3(motion.coef_b, motion.pb, bas)
+            Rl, tl = motion.se3(motion.coef_l, motion.pl, bas)
+            bid, lid = cells["bid"], cells["lid"]
+            m = torch.einsum("nij,nj->ni", Rb[bid], torch.einsum("nij,nj->ni", Rl[lid], m) + tl[lid]) + tb[bid]
+            q = quat_mul(rotmat_to_quat(Rb[bid] @ Rl[lid]), F.normalize(q, dim=-1))
         return m, F.normalize(q, dim=-1), torch.exp(s), torch.sigmoid(params["opacities"]), torch.sigmoid(params["colors"])
 
     def render(t, vm, use_deform):
@@ -190,7 +284,17 @@ def main():
     # ---------------------------------------------------------------- training
     for step in range(a.iters):
         k = int(torch.randint(len(tr_img), (1,)))
-        use_def = deform is not None and step >= a.warmup
+        use_def = has_motion and step >= a.warmup
+        if a.mode == "cluster" and use_def:
+            if motion is None:  # cells from the warm-up geometry, then motion starts from identity
+                with torch.no_grad():
+                    x = params["means"].detach()
+                    motion = ClusterMotion(kmeans(x, a.branch_clusters), kmeans(x, min(a.leaf_clusters, len(x))),
+                                           tmax, a.f_max)
+                opt_def = torch.optim.Adam([{"params": [motion.coef_b, motion.coef_l], "lr": a.motion_lr},
+                                            {"params": [motion.pb, motion.pl], "lr": 1e-5}])
+            frac = (step - a.warmup) / max(0.6 * (a.iters - a.warmup), 1)  # all frequencies open at 60 %
+            motion.f_cut = 0.5 + (a.f_max + 1.0 - 0.5) * min(frac, 1.0)
         img, info = render(tr_t[k], tr_vm[k], use_def)
         strategy.step_pre_backward(params, optimizers, state, step, info)
         gt = tr_img[k]
@@ -207,16 +311,21 @@ def main():
             l1 = res.mean()
         ss = ssim_torch(img.permute(2, 0, 1)[None], gt.permute(2, 0, 1)[None], torch, F)
         loss = 0.8 * l1 + 0.2 * (1 - ss)
+        if use_def and motion is not None:  # stiff branches, freer leaves, small-motion tiebreak
+            loss = loss + a.lam_branch * motion.sobolev(motion.coef_b) + a.lam_leaf * motion.sobolev(motion.coef_l) \
+                + a.lam_amp * (motion.coef_b.pow(2).mean() + motion.coef_l.pow(2).mean())
         loss.backward()
         for opt in optimizers.values():
             opt.step()
             opt.zero_grad(set_to_none=True)
         if use_def:
-            for g in opt_def.param_groups:  # exponential decay 8e-4 -> 1.6e-5 over the deformation phase
-                g["lr"] = 8e-4 * (0.02 ** ((step - a.warmup) / max(a.iters - a.warmup, 1)))
+            for g in opt_def.param_groups:  # exponential decay to 2 % of the base rate over the deformation phase
+                g["lr"] = g.setdefault("base_lr", g["lr"]) * (0.02 ** ((step - a.warmup) / max(a.iters - a.warmup, 1)))
             opt_def.step()
             opt_def.zero_grad(set_to_none=True)
         strategy.step_post_backward(params, optimizers, state, step, info, packed=False)
+        if step % 100 == 0:  # densification/pruning may reorder Gaussians even when their number is unchanged
+            cells["n"] = -1
         if step % 1000 == 0 or step == a.iters - 1:
             print(f"step {step:6d}  loss {loss.item():.4f}  gaussians {len(params['means'])}  "
                   f"deform {'on' if use_def else 'off'}  {time.time() - t_start:.0f}s", flush=True)
@@ -227,7 +336,7 @@ def main():
 
     def geometry(t, leaf_T):
         with torch.no_grad():
-            m, q, s, o, _ = gaussians_at(t, leaf_T is not None and deform is not None)
+            m, q, s, o, _ = gaussians_at(t, leaf_T is not None and has_motion)
         mu, Q, S, op = (x.detach().cpu().numpy().astype(np.float64) for x in (m, q, s, o))
         keep = op >= 0.1
         mu, Q, S, op = mu[keep], Q[keep], S[keep], op[keep]
@@ -258,13 +367,14 @@ def main():
     for key in posed[0]:
         if isinstance(posed[0][key], (int, float)) and all(p.get(key) is not None for p in posed):
             out["posed_" + key] = float(np.mean([p[key] for p in posed]))
-    out["posed_psnr"] = psnr(deform is not None)
-    if deform is not None:  # diagnostic: how far does the learned deformation move Gaussians?
+    out["posed_psnr"] = psnr(has_motion)
+    if has_motion:  # diagnostic: how far does the learned deformation move Gaussians?
         with torch.no_grad():
-            mags = [deform(params["means"], te_t[j].view(1, 1))[0].norm(dim=-1) for j in sel]
-            mags = torch.cat(mags)
+            mags = torch.cat([(gaussians_at(te_t[j], True)[0] - params["means"]).norm(dim=-1) for j in sel])
         out["deform_offset_mm_median"] = float(mags.median()) * 1000
         out["deform_offset_mm_p95"] = float(torch.quantile(mags[torch.randperm(len(mags))[:100000]], 0.95)) * 1000
+    if motion is not None:
+        out.update({"leaf_clusters": len(motion.c_leaf), "branch_clusters": len(motion.c_branch), "f_max": a.f_max})
     out.update({"mode": a.mode, "variant": a.variant, "iters": a.iters, "n_gaussians": int(len(params["means"])),
                 "train_stride": a.train_stride, "n_train_views": len(tr_img),
                 "seconds": round(time.time() - t_start, 1)})

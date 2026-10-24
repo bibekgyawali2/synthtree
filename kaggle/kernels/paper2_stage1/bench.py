@@ -1,7 +1,8 @@
 """Kaggle script kernel, paper 2 stage 1: is the paper-1 deformation collapse an aliasing artefact?
 
-static vs deformable 3DGS trained at 30 fps (every frame) and 7.5 fps (every 4th frame, the paper-1 rate)
-on the SAME stride-1 renders (synthtree-v2-stage1), trees 1/4/5/7, calm + high, noisy variant (2x T4).
+per-cluster rigid motion (the fix) vs the paper-1 deformation field, trained at 30 fps (every frame) and
+7.5 fps (every 4th frame, the paper-1 rate) on the SAME stride-1 renders (synthtree-v2-stage1), trees 1/3/5/7
+(the paper-1 trees), calm + high, noisy variant (2x T4).
 Code comes from the `saurav` branch. Pushed with `kaggle kernels push -p kaggle/kernels/paper2_stage1`.
 Set DYN_SMOKE=1 (top of file) for a 2-run smoke test.
 """
@@ -16,11 +17,16 @@ REPO_URL = "https://github.com/bibekgyawali2/synthtree.git"
 BRANCH = "saurav"
 WORK = "/kaggle/working"
 CODE = f"{WORK}/synthtree"
-COMMON = "--dataset synthtree-v2-stage1 --runs calm:noisy high:noisy --modes static deform --train-strides 1 4"
-# 32 runs x ~26 min / 2 GPUs ~ 7 h (paper-1 settings: 10k iterations, 2k static warm-up = 8k deformation)
-STAGES = ([f"{COMMON} --trees 1 --runs high:noisy --modes deform --iters 600 --warmup 200 --eval-frames 2"]
+COMMON = "--dataset synthtree-v2-stage1 --runs calm:noisy high:noisy --iters 10000 --warmup 2000"  # paper-1 schedule
+# Most important first, in case the session runs short (~28 runs, ~7 h on 2x T4):
+#   A  the fix vs the paper-1 model at 30 fps                          16 runs
+#   B  the fix at 7.5 fps -> compared with paper 1's published numbers   8 runs
+#   C  paper-1 model at 7.5 fps on the new renders (reproduction check)  4 runs
+STAGES = ([f"{COMMON} --trees 1 --runs high:noisy --modes cluster deform --train-strides 1 --iters 600 --warmup 200 --eval-frames 2"]
           if os.environ.get("DYN_SMOKE") == "1" else
-          [f"{COMMON} --trees 1 4 5 7 --iters 10000 --warmup 2000"])
+          [f"{COMMON} --trees 1 3 5 7 --modes cluster deform --train-strides 1",
+           f"{COMMON} --trees 1 3 5 7 --modes cluster --train-strides 4",
+           f"{COMMON} --trees 1 5 --modes deform --train-strides 4"])
 
 
 def sh(cmd):
