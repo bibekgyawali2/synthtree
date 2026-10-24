@@ -1,0 +1,10 @@
+# Paper 2, stage 1: true 30 fps (frame_stride 1) for the sampling-vs-modelling study.
+# One tree per leaf type, calm + high. The 7.5 fps condition is taken from these same frames
+# (every 4th frame) in the trainer, so both rates share identical renders and test views.
+# Rendered in one go on one machine/Blender version; do not mix with synthtree-v1 frames.
+extends: master.yaml
+dataset_name: synthtree-v2-stage1
+output_root: ../data/v2_stage1
+capture: {frame_stride: 1}         # 600 frames / sequence
+only_trees: [1, 4, 5, 7]           # broad_medium, small_dense, compound_medium, needle_sparse
+only_levels: [calm, high]

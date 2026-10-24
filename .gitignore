@@ -1,4 +1,4 @@
-.venv/
+.venv*/
 __pycache__/
 *.pyc
 data/
@@ -9,3 +9,6 @@ logs/
 
 web/splats/
 web/manifest.json
+
+# local secrets (Kaggle token etc.)
+.env

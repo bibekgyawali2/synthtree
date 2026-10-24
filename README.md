@@ -202,6 +202,9 @@ are harmless: frames are written atomically and every stage resumes. Scaling up:
   Depth is assumed aligned to colour (rs2::align), like the synthetic depth.
 - Blender path defaults to `/Applications/Blender.app/...` (macOS); set `BLENDER` elsewhere.
   Tested on 4.5 LTS and 5.2 LTS; 4.2 should work (same API points as 4.5) but is untested.
+  Also verified on Linux (Ubuntu, RTX 4050 laptop, Blender 5.2.2; Cycles uses OptiX). On hybrid-graphics
+  laptops EEVEE silently runs on the integrated GPU (~10x slower); force the NVIDIA GPU with
+  `export __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json`.
 - Noise defaults are D435-like guesses until `calibrate_noise.py` runs on your recordings.
 - Wind amplitudes are uncalibrated (see above). Gusts are spatially uniform over the tree.
 - `nerfstudio==1.1.5` flags in `kaggle/SANITY_SPLATFACTO.md` and the expected PSNR there were
