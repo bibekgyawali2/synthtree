@@ -86,6 +86,8 @@ def main():
                     help="phase of the stride; 2 keeps 7.5 fps frames off the every-8th-frame test views")
     ap.add_argument("--leaf-clusters", type=int, default=2048, help="cluster mode: fine (leaf-scale) cells")
     ap.add_argument("--branch-clusters", type=int, default=32, help="cluster mode: coarse (branch-scale) cells")
+    ap.add_argument("--grouping", default="kmeans", choices=["kmeans", "oracle"],
+                    help="cluster mode: leaf cells from k-means, or one cell per GT leaf (upper bound for grouping)")
     ap.add_argument("--f-max", type=float, default=10.0, help="cluster mode: highest motion frequency, Hz")
     ap.add_argument("--lam-leaf", type=float, default=0.1, help="cluster mode: acceleration penalty, leaf cells")
     ap.add_argument("--lam-branch", type=float, default=1.0, help="cluster mode: acceleration penalty, branch cells")
@@ -255,6 +257,33 @@ def main():
 
     motion = None
     cells = {"n": -1, "bid": None, "lid": None}  # Gaussian -> cell, recomputed after densification
+    oracle = {}  # --grouping oracle: GT leaf points at the time-average pose + cells for everything else
+
+    def nearest_d(x, c, chunk=4096):  # c can hold ~10^4-10^5 leaf vertices
+        d, i = zip(*[torch.cdist(x[j:j + chunk], c).min(1) for j in range(0, len(x), chunk)])
+        return torch.cat(d), torch.cat(i)
+
+    def leaf_cells(m):
+        if not oracle:
+            return nearest(m, motion.c_leaf)
+        d, i = nearest_d(m, oracle["P"])  # a Gaussian within 1 cm of a leaf follows that leaf, the rest k-means cells
+        return torch.where(d < 0.01, oracle["vl"][i], oracle["L"] + nearest(m, oracle["c_other"]))
+
+    def oracle_init(x):
+        z = te.leaf["T"].astype(np.float64)  # (frames, leaves, 3, 4) from the canonical pose
+        A, tt = z[..., :3].mean(0), z[..., 3].mean(0)  # time-average pose ~ the static warm-up geometry
+        ct = load_tree(os.path.join(a.tree_dir, "canonical", "canonical_tree.npz"))
+        vl = ct["leaf_vert_leaf"]
+        P = np.einsum("vij,vj->vi", A[vl], ct["leaf_verts"]) + tt[vl]
+        L = len(A)
+        cen = np.zeros((L, 3))
+        np.add.at(cen, vl, P)
+        cen /= np.maximum(np.bincount(vl, minlength=L), 1)[:, None]
+        oracle.update(P=torch.tensor(P, device=dev, dtype=torch.float32), vl=torch.tensor(vl, device=dev), L=L)
+        d, _ = nearest_d(x, oracle["P"])
+        other = x[d >= 0.01]
+        oracle["c_other"] = kmeans(other, min(256, len(other)))
+        return torch.cat([torch.tensor(cen, device=dev, dtype=torch.float32), oracle["c_other"]])
 
     def gaussians_at(t, use_deform):
         m, q, s = params["means"], params["quats"], params["scales"]
@@ -266,7 +295,7 @@ def main():
         if use_deform and motion is not None:
             if cells["n"] != len(m):
                 with torch.no_grad():
-                    cells.update(n=len(m), bid=nearest(m, motion.c_branch), lid=nearest(m, motion.c_leaf))
+                    cells.update(n=len(m), bid=nearest(m, motion.c_branch), lid=leaf_cells(m))
             bas = motion.basis(t * tmax)
             Rb, tb = motion.se3(motion.coef_b, motion.pb, bas)
             Rl, tl = motion.se3(motion.coef_l, motion.pl, bas)
@@ -289,8 +318,8 @@ def main():
             if motion is None:  # cells from the warm-up geometry, then motion starts from identity
                 with torch.no_grad():
                     x = params["means"].detach()
-                    motion = ClusterMotion(kmeans(x, a.branch_clusters), kmeans(x, min(a.leaf_clusters, len(x))),
-                                           tmax, a.f_max)
+                    c_leaf = oracle_init(x) if a.grouping == "oracle" else kmeans(x, min(a.leaf_clusters, len(x)))
+                    motion = ClusterMotion(kmeans(x, a.branch_clusters), c_leaf, tmax, a.f_max)
                 opt_def = torch.optim.Adam([{"params": [motion.coef_b, motion.coef_l], "lr": a.motion_lr},
                                             {"params": [motion.pb, motion.pl], "lr": 1e-5}])
             frac = (step - a.warmup) / max(0.6 * (a.iters - a.warmup), 1)  # all frequencies open at 60 %
@@ -374,7 +403,8 @@ def main():
         out["deform_offset_mm_median"] = float(mags.median()) * 1000
         out["deform_offset_mm_p95"] = float(torch.quantile(mags[torch.randperm(len(mags))[:100000]], 0.95)) * 1000
     if motion is not None:
-        out.update({"leaf_clusters": len(motion.c_leaf), "branch_clusters": len(motion.c_branch), "f_max": a.f_max})
+        out.update({"leaf_clusters": len(motion.c_leaf), "branch_clusters": len(motion.c_branch), "f_max": a.f_max,
+                    "grouping": a.grouping})
     out.update({"mode": a.mode, "variant": a.variant, "iters": a.iters, "n_gaussians": int(len(params["means"])),
                 "train_stride": a.train_stride, "n_train_views": len(tr_img),
                 "seconds": round(time.time() - t_start, 1)})

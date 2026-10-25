@@ -13,7 +13,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-NAMES = {"static": "static3dgs", "deform": "dyn3dgs", "robust": "robust3dgs", "cluster": "cluster3dgs"}
+NAMES = {"static": "static3dgs", "deform": "dyn3dgs", "robust": "robust3dgs", "cluster": "cluster3dgs", "oracle": "oracle3dgs"}
+# "oracle" = cluster mode with one motion cell per GT leaf (upper bound for the grouping)
+MODE_ARGS = {"oracle": "--mode cluster --grouping oracle"}
 
 
 def main():
@@ -49,7 +51,7 @@ def main():
             continue
         log = os.path.join(res, name + ".log")
         cmd = (f"python {HERE}/dyngs.py --seq {root}/tree_{tid:02d}/wind_{level} --tree-dir {root}/trees/tree_{tid:02d} "
-               f"--variant {variant} --mode {mode} --iters {a.iters} --warmup {a.warmup} --seed {seed} "
+               f"--variant {variant} {MODE_ARGS.get(mode, '--mode ' + mode)} --iters {a.iters} --warmup {a.warmup} --seed {seed} "
                f"--eval-frames {a.eval_frames} --train-stride {stride} --out {out}")
         print(f"[run ] {name}", flush=True)
         t0 = time.time()
