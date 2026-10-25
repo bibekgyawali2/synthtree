@@ -18,13 +18,16 @@ BRANCH = "saurav"
 WORK = "/kaggle/working"
 CODE = f"{WORK}/synthtree"
 COMMON = "--dataset synthtree-v2-stage1 --runs calm:noisy high:noisy --iters 10000 --warmup 2000"  # paper-1 schedule
-# Most important first, in case the session runs short (~28 runs, ~7 h on 2x T4):
-#   A  the fix vs the paper-1 model at 30 fps                          16 runs
-#   B  the fix at 7.5 fps -> compared with paper 1's published numbers   8 runs
-#   C  paper-1 model at 7.5 fps on the new renders (reproduction check)  4 runs
+# Most important first, in case the session runs short (36 runs, ~5-5.5 h on 2x T4; cluster/oracle ~12 min,
+# deform ~26 min per run):
+#   A   the fix vs the paper-1 model at 30 fps                          16 runs
+#   A2  oracle grouping (one cell per GT leaf) at 30 fps: upper bound    8 runs
+#   B   the fix at 7.5 fps -> compared with paper 1's published numbers   8 runs
+#   C   paper-1 model at 7.5 fps on the new renders (reproduction check)  4 runs
 STAGES = ([f"{COMMON} --trees 1 --runs high:noisy --modes cluster deform oracle --train-strides 1 --iters 600 --warmup 200 --eval-frames 2"]
           if os.environ.get("DYN_SMOKE") == "1" else
           [f"{COMMON} --trees 1 3 5 7 --modes cluster deform --train-strides 1",
+           f"{COMMON} --trees 1 3 5 7 --modes oracle --train-strides 1",
            f"{COMMON} --trees 1 3 5 7 --modes cluster --train-strides 4",
            f"{COMMON} --trees 1 5 --modes deform --train-strides 4"])
 
