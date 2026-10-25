@@ -48,12 +48,15 @@ def _imread(path):
 
 
 def find_dataset_root(name="synthtree-v1", base="/kaggle/input"):
-    """Locate the mounted dataset (Kaggle mounts at /kaggle/input/<name> or /kaggle/input/datasets/<user>/<name>)."""
-    for r, dirs, _ in os.walk(base):
-        if os.path.basename(r) == name or ("trees" in dirs and any(d.startswith("tree_") for d in dirs)):
-            return r
-        if r.count(os.sep) - base.count(os.sep) >= 3:
-            dirs[:] = []
+    """Locate the mounted dataset (Kaggle mounts at /kaggle/input/<name> or /kaggle/input/datasets/<user>/<name>).
+    An exact name match wins; the layout fallback (a folder with trees/ and tree_XX/) is only used if no folder has
+    that name, since with several SynthTree datasets attached it would match any of them."""
+    for exact in (True, False):
+        for r, dirs, _ in os.walk(base):
+            if os.path.basename(r) == name or (not exact and "trees" in dirs and any(d.startswith("tree_") for d in dirs)):
+                return r
+            if r.count(os.sep) - base.count(os.sep) >= 3:
+                dirs[:] = []
     raise FileNotFoundError(f"dataset '{name}' not found under {base}; is it added as an Input? Found: {os.listdir(base)}")
 
 

@@ -1,0 +1,9 @@
+# Paper 2, stage 1, multi-view probe: a second camera synchronised with paper2_stage1.yaml.
+# Same trees, wind phases, frame times and orbit, started 90 deg further round the tree, so at every
+# instant the leaves are seen from two directions. Tests whether viewpoint coverage per instant, not
+# temporal sampling or the motion model, limits reconstruction under wind.
+extends: paper2_stage1.yaml
+dataset_name: synthtree-v2-stage1-cam2
+output_root: ../data/v2_stage1_cam2
+capture: {orbit: {start_angle_deg: 90.0}}
+only_trees: [1, 3, 5, 7]           # the trees used in training

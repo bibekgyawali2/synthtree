@@ -31,12 +31,15 @@ def main():
     ap.add_argument("--warmup", type=int, default=3000)
     ap.add_argument("--eval-frames", type=int, default=4)
     ap.add_argument("--dataset", default="synthtree-v1")
+    ap.add_argument("--dataset2", default=None,
+                    help="dataset of a synchronised second camera; its training views are added (tagged _mv)")
     ap.add_argument("--work", default="/kaggle/working")
     ap.add_argument("--shard", type=int, default=0)
     ap.add_argument("--num-shards", type=int, default=1)
     a = ap.parse_args()
     import synthtree_dataset
     root = synthtree_dataset.find_dataset_root(a.dataset)
+    root2 = synthtree_dataset.find_dataset_root(a.dataset2) if a.dataset2 else None
     res = os.path.join(a.work, "results")
     os.makedirs(res, exist_ok=True)
     jobs = [(m, t, r, s, k) for t in a.trees for r in a.runs for m in a.modes for s in a.seeds
@@ -44,7 +47,8 @@ def main():
     print(f"worker {a.shard}/{a.num_shards}: {len(jobs)} runs", flush=True)
     for mode, tid, run, seed, stride in jobs:
         level, variant = run.split(":")
-        name = f"{NAMES[mode]}{f'_st{stride}' if stride > 1 else ''}__tree_{tid:02d}__{level}__{variant}__s{seed}"
+        tag = (f"_st{stride}" if stride > 1 else "") + ("_mv" if root2 else "")
+        name = f"{NAMES[mode]}{tag}__tree_{tid:02d}__{level}__{variant}__s{seed}"
         out = os.path.join(res, name + "__geom.json")
         if os.path.exists(out):
             print(f"[skip] {name}", flush=True)
@@ -52,7 +56,8 @@ def main():
         log = os.path.join(res, name + ".log")
         cmd = (f"python {HERE}/dyngs.py --seq {root}/tree_{tid:02d}/wind_{level} --tree-dir {root}/trees/tree_{tid:02d} "
                f"--variant {variant} {MODE_ARGS.get(mode, '--mode ' + mode)} --iters {a.iters} --warmup {a.warmup} --seed {seed} "
-               f"--eval-frames {a.eval_frames} --train-stride {stride} --out {out}")
+               f"--eval-frames {a.eval_frames} --train-stride {stride} --out {out}"
+               + (f" --seq2 {root2}/tree_{tid:02d}/wind_{level}" if root2 else ""))
         print(f"[run ] {name}", flush=True)
         t0 = time.time()
         with open(log, "w") as f:

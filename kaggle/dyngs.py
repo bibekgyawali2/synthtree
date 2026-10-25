@@ -70,6 +70,9 @@ def positional_encoding(x, n_freq, torch):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seq", required=True)
+    ap.add_argument("--seq2", default=None,
+                    help="synchronised second camera (same tree, wind and frame times): its training frames are added; "
+                         "test views, initialisation and ground truth stay those of --seq")
     ap.add_argument("--tree-dir", required=True)
     ap.add_argument("--variant", default="noisy", choices=["clean", "noisy"])
     ap.add_argument("--mode", default="deform", choices=["static", "deform", "robust", "cluster"],
@@ -133,6 +136,12 @@ def main():
             idx.append(it["frame_index"])
         return torch.stack(imgs).to(dev), torch.stack(vms).to(dev), torch.tensor(ts, device=dev), idx
     tr_img, tr_vm, tr_t, _ = load_split(tr)
+    if a.seq2:  # multi-view probe: the same instants seen from a second direction
+        tr2 = SynthTreeSequence(a.seq2, variant=a.variant, split="train", load=("rgb",), with_leaf_gt=False)
+        tr2.frames = [i for i in tr2.frames if i in set(tr.frames)]
+        assert np.allclose(tr2.times[tr2.frames], tr.times[tr.frames]), "second camera is not synchronised"
+        img2, vm2, t2, _ = load_split(tr2)
+        tr_img, tr_vm, tr_t = torch.cat([tr_img, img2]), torch.cat([tr_vm, vm2]), torch.cat([tr_t, t2])
     te_img, te_vm, te_t, te_idx = load_split(te)
     top = tr_img[:, : max(1, H // 10)].reshape(-1, 3)
     bg = top.median(0).values  # sky / far background colour from the top rows of the training views
@@ -406,7 +415,7 @@ def main():
         out.update({"leaf_clusters": len(motion.c_leaf), "branch_clusters": len(motion.c_branch), "f_max": a.f_max,
                     "grouping": a.grouping})
     out.update({"mode": a.mode, "variant": a.variant, "iters": a.iters, "n_gaussians": int(len(params["means"])),
-                "train_stride": a.train_stride, "n_train_views": len(tr_img),
+                "train_stride": a.train_stride, "n_train_views": len(tr_img), "n_cameras": 2 if a.seq2 else 1,
                 "seconds": round(time.time() - t_start, 1)})
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     json.dump(out, open(a.out, "w"), indent=1)
