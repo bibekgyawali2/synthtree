@@ -67,7 +67,7 @@ def main():
     runs = load([os.path.join(res, "paper2_stage1"), os.path.join(res, "paper2_stage1_seeds")])
     p1 = load([os.path.join(res, "dynamic_v2")])
     rank = json.load(open(os.path.join(res, "paper2", "motion_rank_high.json")))["trees"]
-    n_runs = sum(len(v) for v in runs.values())
+    n_runs = sum(len(v) for v in runs.values()) + len(glob.glob(os.path.join(res, "paper2_stage1_seeds", "gsplat140", "*__geom.json")))
     n_seeds_hi = {m: max(len(runs.get((m, t, "high"), [])) for t in TREES) for m in LABEL}
 
     M = {}
@@ -115,6 +115,19 @@ def main():
         new = [r["posed_fscore"] for r in runs.get(("dyn3dgs_st4", "tree_01", lv), [])]
         old = [r["posed_fscore"] for r in p1.get(("dyn3dgs", "tree_01", lv), [])]
         M[f"SoReproNew{tag}"], M[f"SoReproOld{tag}"] = fmt(mean(new)), fmt(mean(old))
+
+    # rasteriser-version control: static 3DGS at 7.5 fps on tree 1, new renders, gsplat 1.5.3 vs 1.4.0
+    # (the release paper 1 got through nerfstudio 1.1.5) vs paper 1 itself
+    v140 = load([os.path.join(res, "paper2_stage1_seeds", "gsplat140")])
+    for lv, tag in (("calm", "Calm"), ("high", "Hi")):
+        M[f"SoChkFive{tag}"] = fmt(mean([r["posed_fscore"] for r in runs.get(("static3dgs_st4", "tree_01", lv), [])]))
+        M[f"SoChkFour{tag}"] = fmt(mean([r["posed_fscore"] for r in v140.get(("static3dgs_st4", "tree_01", lv), [])]))
+        M[f"SoChkPaper{tag}"] = fmt(mean([r["posed_fscore"] for r in p1.get(("static3dgs", "tree_01", lv), [])]))
+
+    # seed-to-seed spread of the posed F-score at high wind (per tree, methods with several seeds)
+    sds = [np.std([r["posed_fscore"] for r in runs[(m, t, "high")]], ddof=1)
+           for m in ("static3dgs", "cluster3dgs", "oracle3dgs") for t in TREES if len(runs.get((m, t, "high"), [])) > 1]
+    M["SoSeedSdMax"] = fmt(max(sds)) if sds else "--"
 
     # motion complexity of the ground truth (closed-form wind model, 30 fps, high wind, the four trees)
     rk = [rank[t] for t in TREES]
