@@ -1,0 +1,108 @@
+"""Kaggle script kernel, stage 1 follow-up: extra seeds and a gsplat-version check (2x T4).
+
+(b) seeds 1 and 2 for static / cluster (the fix) / oracle at high wind, 30 fps, trees 1/3/5/7, with the
+    same gsplat 1.5.3 as the 44-run kernel (synthtree-paper2-stage1 v3), so all runs share one library.
+(a) the paper-1 condition static @ 7.5 fps on tree 1 (calm + high), once with gsplat 1.5.3 and once with
+    gsplat 1.4.0 (what paper 1 got through nerfstudio 1.1.5), on identical data: does the library version
+    explain why the v2 numbers sit below paper 1's?
+Code comes from the `saurav` branch. Pushed with `kaggle kernels push -p kaggle/kernels/stage1_seeds`.
+"""
+import os
+import subprocess
+import sys
+import threading
+import time
+
+REPO_URL = "https://github.com/bibekgyawali2/synthtree.git"
+BRANCH = "saurav"
+WORK = "/kaggle/working"
+CODE = f"{WORK}/synthtree"
+COMMON = "--dataset synthtree-v2-stage1 --runs calm:noisy high:noisy --iters 10000 --warmup 2000"  # paper-1 schedule
+# ~3-3.5 h on 2x T4: 24 seed runs (static ~4, cluster ~11, oracle ~8 min) + 4 short version-check runs
+STAGES = [f"{COMMON} --trees 1 3 5 7 --runs high:noisy --modes static cluster oracle --train-strides 1 --seeds 1 2",
+          f"{COMMON} --trees 1 --modes static --train-strides 4"]
+CHECK = f"{COMMON} --trees 1 --modes static --train-strides 4 --work {WORK}/gsplat140"  # rerun under gsplat 1.4.0
+
+
+T0 = time.time()
+
+
+def sh(cmd):
+    print(f"[{(time.time() - T0) / 60:5.1f} min] $ {cmd}", flush=True)
+    return subprocess.run(cmd, shell=True).returncode
+
+
+def clone():
+    for attempt in range(5):
+        if sh(f"git clone -q -b {BRANCH} {REPO_URL} {CODE}") == 0:
+            return
+        print(f"clone failed (attempt {attempt + 1}/5); the repository must be PUBLIC", flush=True)
+        time.sleep(20 * (attempt + 1))
+    sys.exit("could not clone the code repository - is github.com/bibekgyawali2/synthtree public?")
+
+
+WARMUP = r"""
+import torch, gsplat
+d = "cuda"
+means = torch.zeros(1, 3, device=d)
+quats = torch.tensor([[1.0, 0, 0, 0]], device=d)
+scales = torch.full((1, 3), 0.01, device=d)
+viewmat = torch.eye(4, device=d)[None]
+viewmat[0, 2, 3] = 2.0
+K = torch.tensor([[[100.0, 0, 50], [0, 100.0, 50], [0, 0, 1]]], device=d)
+img, _, _ = gsplat.rasterization(means, quats, scales, torch.ones(1, device=d), torch.ones(1, 3, device=d), viewmat, K, 100, 100)
+img.sum().backward() if img.requires_grad else None
+print("gsplat CUDA kernels ready", tuple(img.shape))
+"""
+
+
+def warmup_gsplat():
+    """Compile gsplat's CUDA extension ONCE before the workers start. Two processes JIT-compiling
+    into the same torch_extensions folder delete each other's build files, failing every run."""
+    with open(f"{WORK}/warmup_gsplat.py", "w") as f:
+        f.write(WARMUP)
+    env = dict(os.environ, MAX_JOBS="4", CUDA_VISIBLE_DEVICES="0")
+    for attempt in range(2):
+        print(f"[{(time.time() - T0) / 60:5.1f} min] $ compiling gsplat (attempt {attempt + 1}, ~5-15 min)", flush=True)
+        if subprocess.run(f"python {WORK}/warmup_gsplat.py", shell=True, env=env).returncode == 0:
+            return
+    sys.exit("gsplat CUDA extension failed to compile - aborting before wasting GPU time")
+
+
+def run_workers(args, n_gpus):
+    """One run_benchmark worker per GPU, output prefixed with the GPU index."""
+    procs = []
+    for k in range(n_gpus):
+        env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(k))
+        cmd = f"python kaggle/run_dyn.py {args} --shard {k} --num-shards {n_gpus}"
+        print(f"[gpu{k}] $ {cmd}", flush=True)
+        p = subprocess.Popen(cmd, shell=True, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+
+        def pump(p=p, k=k):
+            for line in p.stdout:
+                print(f"[gpu{k}] {line}", end="", flush=True)
+        threading.Thread(target=pump, daemon=True).start()
+        procs.append(p)
+        time.sleep(5)
+    return [p.wait() for p in procs]
+
+
+clone()
+sh("pip install --progress-bar off gsplat==1.5.3 ninja jaxtyping rich")  # same gsplat as the 44-run kernel
+os.chdir(CODE)
+sh("git log --oneline -1")
+n = int(subprocess.run("nvidia-smi -L | wc -l", shell=True, capture_output=True, text=True).stdout.strip() or 1)
+warmup_gsplat()
+print(f"[{(time.time() - T0) / 60:5.1f} min] GPUs: {n}", flush=True)
+for stage in STAGES:
+    print(f"\n[{(time.time() - T0) / 60:5.1f} min] ===== stage: {stage}", flush=True)
+    print("exit codes:", run_workers(stage, max(1, n)), flush=True)
+    sh(f"python scripts/eval/collect_results.py --dir {WORK}/results --out {WORK}/results.csv")
+
+# (a) same paper-1 condition under gsplat 1.4.0; its JIT build must not reuse the 1.5.3 extension cache
+sh("pip install --progress-bar off gsplat==1.4.0 && rm -rf ~/.cache/torch_extensions")
+warmup_gsplat()
+print(f"\n[{(time.time() - T0) / 60:5.1f} min] ===== check (gsplat 1.4.0): {CHECK}", flush=True)
+print("exit codes:", run_workers(CHECK, max(1, n)), flush=True)
+sh(f"python scripts/eval/collect_results.py --dir {WORK}/gsplat140/results --out {WORK}/results_gsplat140.csv")
+sh(f"rm -rf {WORK}/ns {WORK}/runs {WORK}/export {CODE}")  # keep only results in the output
