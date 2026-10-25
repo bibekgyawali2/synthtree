@@ -32,8 +32,11 @@ STAGES = ([f"{COMMON} --trees 1 --runs high:noisy --modes cluster deform oracle 
            f"{COMMON} --trees 1 5 --modes deform --train-strides 4"])
 
 
+T0 = time.time()
+
+
 def sh(cmd):
-    print("$", cmd, flush=True)
+    print(f"[{(time.time() - T0) / 60:5.1f} min] $ {cmd}", flush=True)
     return subprocess.run(cmd, shell=True).returncode
 
 
@@ -68,7 +71,7 @@ def warmup_gsplat():
         f.write(WARMUP)
     env = dict(os.environ, MAX_JOBS="4", CUDA_VISIBLE_DEVICES="0")
     for attempt in range(2):
-        print(f"$ compiling gsplat (attempt {attempt + 1})", flush=True)
+        print(f"[{(time.time() - T0) / 60:5.1f} min] $ compiling gsplat (attempt {attempt + 1}, ~5-15 min)", flush=True)
         if subprocess.run(f"python {WORK}/warmup_gsplat.py", shell=True, env=env).returncode == 0:
             return
     sys.exit("gsplat CUDA extension failed to compile - aborting before wasting GPU time")
@@ -93,14 +96,14 @@ def run_workers(args, n_gpus):
 
 
 clone()
-sh("pip install -q nerfstudio 2>&1 | tail -n 2")
+sh("pip install --progress-bar off gsplat==1.5.3 ninja jaxtyping rich")  # same gsplat as the local tests
 os.chdir(CODE)
 sh("git log --oneline -1")
 n = int(subprocess.run("nvidia-smi -L | wc -l", shell=True, capture_output=True, text=True).stdout.strip() or 1)
 warmup_gsplat()
-print(f"GPUs: {n}", flush=True)
+print(f"[{(time.time() - T0) / 60:5.1f} min] GPUs: {n}", flush=True)
 for stage in STAGES:
-    print(f"\n===== stage: {stage}", flush=True)
+    print(f"\n[{(time.time() - T0) / 60:5.1f} min] ===== stage: {stage}", flush=True)
     print("exit codes:", run_workers(stage, max(1, n)), flush=True)
     sh(f"python scripts/eval/collect_results.py --dir {WORK}/results --out {WORK}/results.csv")
 sh(f"rm -rf {WORK}/ns {WORK}/runs {WORK}/export")
