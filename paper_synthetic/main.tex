@@ -7,6 +7,7 @@
 \usepackage{siunitx}
 \usepackage[hidelinks]{hyperref}
 \usepackage[capitalise]{cleveref}
+\usepackage{placeins}  % \FloatBarrier keeps result figures before the discussion
 
 \input{generated/numbers.tex}
 \input{generated/numbers_stage1.tex}  % 30 fps follow-up, scripts/paper/make_stage1_assets.py
@@ -64,14 +65,14 @@ Code and data are released (\cref{sec:availability}).
 
 % ======================================================================
 \section{The SynthTree generator}\label{sec:method}
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\includegraphics[width=\linewidth]{architecture.png}
 \caption{Overview. (1) SynthTree generates a procedural sapling, moves it with a closed-form wind model and renders D435i-like RGB-D frames with sensor noise. (2) Calm and windy sequences share tree and camera path and come with exact per-leaf ground truth; the follow-up adds full 30\,fps sampling (7.5\,fps = every fourth frame) and a synchronised second camera. (3) Reconstruction methods on one gsplat rasteriser. (4) Evaluation against the leaf surface posed at held-out frame times; the wind component is the windy-minus-calm error. Dashed: the oracle uses ground-truth leaf identities. Source: \texttt{paper\_synthetic/figures/architecture.drawio}.}
 \label{fig:architecture}
 \end{figure}
 \Cref{fig:architecture} gives an overview of the pipeline, from the generator to the evaluation. \Cref{fig:trees} shows the \NTrees{} saplings of the released dataset and \cref{fig:modalities} the per-frame products. The pipeline is pure Python/NumPy except for rendering (Blender, headless); identical configuration and seed give bit-identical geometry, poses and ground truth, which we verified across two Blender LTS versions with different Python/NumPy versions.
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\includegraphics[width=\linewidth]{fig_trees.png}
 \caption{The \NTrees{} procedural saplings (calm, first frame): broad, small, pinnate-compound and needle leaves at sparse to dense canopy densities, including an autumn-coloured variant for vegetation-mask robustness. Leaves are real meshes, not alpha-textured cards.}
 \label{fig:trees}
@@ -80,7 +81,7 @@ Code and data are released (\cref{sec:availability}).
 \subsection{Procedural saplings with leaf identities}
 Each tree is a skeleton of nodes (position, radius, parent) grouped into branches of increasing order, grown with stochastic wander, phototropic up-turn and phyllotactic or whorled branching \citep{weber1995trees}. Wood is meshed as parallel-transported tubes. Leaf sites are spaced along branch segments; a leaf is attached at the bark surface of a segment and inherits that segment's frame. Leaf blades are real triangulated surfaces with species-dependent outlines (ovate, elliptic, obovate, lanceolate), cupping and droop; compound leaves consist of a rachis and leaflets, and needles are closed triangular prisms. Every leaf has an integer identity, an attachment point, a parent branch, a rest frame, an area and a centroid, stored with the canonical (rest) mesh (\cref{tab:trees}). Heights range from \HeightMin{} to \HeightMax\,m and leaf counts from \NLeavesMin{} to \NLeavesMax{}.
 
-\begin{table}[t]
+\begin{table}[!tbp]
 \centering\small
 \caption{Dataset composition. Height includes the pot; triangles count wood and leaves. The experiments use trees 1, 3, 5 and 7 (one per leaf type); trees 8 and 9 are designated as a test split for future generalisation studies and are not used in this paper.}
 \label{tab:trees}
@@ -112,7 +113,7 @@ with a per-leaf frequency $f_\ell\in[2.5, 9]$\,Hz, mean down-wind reconfiguratio
 
 \paragraph{Amplitude laws and gusts} $g_b(U) = (U/U_r)^2$ follows the quadratic dependence of drag on speed for small elastic deflections; $g_l(U) = s\tanh\big((U/U_r)/s\big)$ lets flutter grow roughly linearly and saturate. Gusts modulate the speed, $U_e(t) = U\,\max\{0,\,1+\gamma\,n(t)\}$, with a smooth seeded noise $n(t)$. All angles vanish exactly at $U=0$ and rotations are evaluated element-wise, so calm sequences are the rest pose bit-for-bit. Phases depend only on the tree seed, so different wind levels of a tree differ only in amplitude. Over \NFrames{} frames, the median leaf displacement at \WindMax\,m/s ranges from \WindDispHiMin{} to \WindDispHiMax\,mm across trees, with median leaf rotations of \WindRotHiMin--\WindRotHiMax$^\circ$ (\cref{fig:wind}). The amplitudes are plausible defaults chosen so that leaves move by millimetres in light wind and by several centimetres at \WindMax\,m/s; they are configurable, and a calibration procedure against static-camera fan recordings is provided (\cref{sec:calib}). Because absolute amplitudes are not tied to a specific plant and fan, the resulting leaf motion is reported alongside $U$ (\cref{fig:wind}).
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\includegraphics[width=0.9\linewidth]{fig_wind_motion.pdf}
 \caption{Ground-truth leaf motion per tree versus canopy wind speed (median over leaves and frames).}
 \label{fig:wind}
@@ -123,7 +124,7 @@ The camera uses D435i-like pinhole intrinsics for the $848\times480$ colour stre
 
 RGB is rendered with EEVEE or Cycles and converted to 8-bit sRGB with the exact transfer function. Ground truth is rendered in a separate Cycles pass with one sample per pixel and a 0.01-pixel box filter, so every value is the first hit of the ray through the pixel centre and is never blended across edges. Shader outputs store per-pixel world position, normal, leaf identity, semantic class, rest position and next-frame position. Depth is computed as $z = (\mathbf P - \mathbf C)\cdot \mathbf o$ from the world position, so it is z-depth by construction. Exact optical flow is obtained by projecting the interpolated next-frame position, which also covers non-rigid wood deformation. Motion blur and rolling shutter can be rendered by sub-frame and row-band integration, but \emph{both are disabled in every experiment reported here}: all RGB frames are instantaneous global-shutter images, which is optimistic relative to real hand-held capture of moving foliage (\cref{sec:discussion}).
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\includegraphics[width=\linewidth]{fig_modalities.png}
 \caption{Per-frame products for a broad-leaved sapling at $U=\WindMax$\,m/s. Clean products are exact; noisy RGB and depth follow the sensor model of \cref{sec:noise}.}
 \label{fig:modalities}
@@ -138,7 +139,7 @@ All experiments in this paper use D435-like default noise parameters ($\sigma(z)
 \subsection{Validation}
 Every sequence is validated automatically on the exported products (\cref{tab:validation}); all \NSeqPassed{} of \NSeqValidated{} sequences pass. The decisive check for depth convention is geometric: back-projecting the depth of the floor yields points within \ValGroundUm\,$\mu$m of the plane $z=0$ even in the image corners, whereas interpreting the same values as ray distance would displace them by \ValRayMm\,mm.
 
-\begin{table}[t]
+\begin{table}[!tbp]
 \centering\small
 \caption{Automatic validation over all released sequences.}
 \label{tab:validation}
@@ -168,14 +169,14 @@ The interaction term measures how far sensor and wind errors are from additive. 
 \section{Results}\label{sec:results}
 We report \NRunsTotal{} training runs in total (\cref{tab:runs}): \NRunsBench{} in the benchmark and \NRunsStudy{} in the baseline study of \cref{sec:dynamic}. The benchmark trains splatfacto on \NResultTrees{} trees (one per leaf type: broad, small, compound, needle) under six conditions (noisy sensor at all four wind speeds, clean sensor at calm and \WindMax\,m/s) with \NResultSeeds{} seeds each, and depth-nerfacto on a broad-leaved and a needle tree under the same six conditions with one seed. The mean standard deviation of the leaf F-score between seeds is \SpSeedStdF{}, an order of magnitude below the wind effects reported below. Depth-nerfacto is restricted to two trees and one seed because each run takes 82\,min on the available hardware; its conclusions are therefore indicative.
 
-\begin{table}[t]
+\begin{table}[!tbp]
 \centering\small
 \caption{Accounting of all training runs reported in this paper. A superseded first round of 16 deformable runs with a six-band temporal encoding (\cref{sec:dynamic}) is not included.}
 \label{tab:runs}
 \resizebox{\linewidth}{!}{\input{generated/tab_runs.tex}}
 \end{table}
 
-\begin{table}[t]
+\begin{table}[!tbp]
 \centering\small
 \caption{Benchmark results. splatfacto: mean over 4 trees and 2 seeds; depth-nerfacto: mean over 2 trees, 1 seed. Low, medium, high: $U = 1.5$, 3, 5\,m/s. F@5mm, Prec., Rec.: leaf F-score, precision and recall at $\tau = 5$\,mm; CD: capped chamfer distance; Area err: relative leaf-area error; Angle W1: leaf inclination distribution distance; Floaters: fraction of reconstructed points farther than 3\,cm from every surface.}
 \label{tab:results}
@@ -190,14 +191,14 @@ We report \NRunsTotal{} training runs in total (\cref{tab:runs}): \NRunsBench{} 
 
 \paragraph{Interaction} For splatfacto at \WindMax\,m/s the interaction is $+1.4 \pm 1.5$\,mm in chamfer distance and $-0.8 \pm 2.1$\,mm in centroid error, against wind terms of $+\SpWindHiCD$ and $+\SpWindHiCentroid$\,mm (\cref{tab:decomp}); for depth-nerfacto (two trees) it is $+2.2 \pm 3.1$\,mm in chamfer distance. The interaction is thus small relative to the wind term, but its tree-to-tree spread is as large as its mean: within the resolution of four trees we see no evidence of strong non-additivity, which is weaker than establishing that sensor and wind errors are additive.
 
-\begin{table}[t]
+\begin{table}[!tbp]
 \centering\small
 \caption{Three-way error decomposition (splatfacto: mean $\pm$ std over 4 trees after averaging 2 seeds; depth-nerfacto: 2 trees, 1 seed). $^{\dagger}$The occlusion/method row gives absolute values in the calm, clean condition (F@5mm, CD, centroid error). All other rows are signed error increases as defined in \cref{sec:protocol}: positive means worse, so a positive F entry is a \emph{decrease} of the F-score, and a negative entry (e.g.\ the splatfacto sensor term) is an apparent improvement. Large standard deviations reflect tree-to-tree variability (leaf type, density), not seed noise.}
 \label{tab:decomp}
 \input{generated/tab_decomp.tex}
 \end{table}
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\includegraphics[width=\linewidth]{fig_decomposition.pdf}
 \caption{Wind error versus canopy wind speed. Points: mean over trees after averaging seeds; error bars: $\pm$ one standard deviation over trees (4 for splatfacto, 2 for depth-nerfacto), dominated by tree-to-tree differences in leaf type and motion (between-seed std of F $\approx$ \SpSeedStdF{}). Dotted lines mark the sensor error.}
 \label{fig:decomp}
@@ -205,7 +206,7 @@ We report \NRunsTotal{} training runs in total (\cref{tab:runs}): \NRunsBench{} 
 
 \paragraph{View synthesis hides geometric damage} From calm to \WindMax\,m/s, PSNR on held-out views changes by \RelChangePSNR\,\% while the leaf F-score changes by \RelChangeF\,\% (\cref{fig:imggeo}). Methods that average moving leaves into blurred but plausible appearance are rewarded by image metrics; per-leaf geometric ground truth is needed to expose the error.
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\includegraphics[width=0.9\linewidth]{fig_image_vs_geometry.pdf}
 \caption{Geometry (left) versus view-synthesis quality (right) under increasing wind, splatfacto, noisy sensor; mean $\pm$ std over 4 trees after averaging seeds.}
 \label{fig:imggeo}
@@ -217,14 +218,14 @@ We report \NRunsTotal{} training runs in total (\cref{tab:runs}): \NRunsBench{} 
 
 \paragraph{Mitigation} The trimmed loss improves the posed F-score over plain static 3DGS in \RbWins{} of \RbConds{} tree--wind conditions (one-sided sign test $p = \RbSignP$, treating conditions as independent although they share four trees), raising precision and recall together, lowering the posed chamfer distance by \RbCDGainHi\,mm at \WindMax\,m/s and reducing floaters (\cref{tab:dynamic}); held-out PSNR is essentially unchanged. The gain, however, is largest in calm air ($+$\RbGainCalm{}) and smaller at \WindMax\,m/s ($+$\RbGainHi{}), and the calm-to-\WindMax\,m/s drop of the trimmed variant (\RbWindDrop{}) is as large as that of plain 3DGS (\StWindDropPosed{}). Down-weighting poorly explained pixels is thus a cheap and consistently beneficial robustness measure, but it reduces the method/sensor component rather than the wind component of the error: once leaves move, the residual is not confined to a minority of outlier pixels that can be discarded.
 
-\begin{table}[t]
+\begin{table}[!tbp]
 \centering\small
 \caption{Static, trimmed-loss and deformable 3DGS (same implementation; noisy sensor; mean over \NDynTrees{} trees). F and CD against the rest pose and against the leaves posed at held-out frame times; PSNR on held-out views (deformed for the deformable model).}
 \label{tab:dynamic}
 \resizebox{\linewidth}{!}{\input{generated/tab_dynamic.tex}}
 \end{table}
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\includegraphics[width=0.9\linewidth]{fig_dynamic.pdf}
 \caption{Leaf F-score versus wind speed against the rest pose (left) and against the posed leaves (right) for static, trimmed-loss and deformable 3DGS; mean $\pm$ std over 4 trees (one seed each); the spread reflects tree-to-tree variability.}
 \label{fig:dynamic}
@@ -233,7 +234,7 @@ We report \NRunsTotal{} training runs in total (\cref{tab:runs}): \NRunsBench{} 
 \subsection{Follow-up: sampling or modelling?}\label{sec:stage1}
 The frames used above are 0.13\,s apart, and \SoAliasPctMin--\SoAliasPctMax\,\% of the energy of the ground-truth leaf-normal trajectories lies above their 3.75\,Hz Nyquist limit (closed-form wind model at \WindMax\,m/s, trees 1, 3, 5 and 7). The collapse of the deformable baseline could therefore be caused by temporal sampling rather than by the motion model. To separate the two, we re-rendered the four trees, calm and at \WindMax\,m/s, at the full 30\,fps (600 frames per orbit; identical trees, wind phases and camera path) and trained every model on all frames (30\,fps) and on every fourth frame (7.5\,fps, the rate used above), so that both rates share the renders and the held-out views.
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\includegraphics[width=\linewidth]{model_architecture.png}
 \caption{Reconstruction model. Canonical Gaussians, initialised from back-projected sensor depth, are moved to the time $t$ of a training view by a motion module, the only component that differs between the methods compared; the moved Gaussians are rendered with the gsplat rasteriser from the known camera pose (no camera tracking is needed) and compared with the training view. Gradients update both the Gaussians and the motion parameters. The two oracles (dashed) use ground-truth leaf identities or leaf motion and serve as upper bounds. Source: \texttt{paper\_synthetic/figures/model\_architecture.drawio}.}
 \label{fig:model}
@@ -251,33 +252,33 @@ The frames used above are 0.13\,s apart, and \SoAliasPctMin--\SoAliasPctMax\,\% 
 
 \paragraph{Learned motion falls far short of the true motion} What remains is the estimation of leaf motion itself. The ground-truth leaf centroids move by \SoGtMotionRmsMin--\SoGtMotionRmsMax\,mm (RMS about their mean) at \WindMax\,m/s, whereas even with oracle groups the learned offsets have a median of \SoOrOffMed\,mm and a 95th percentile of \SoOrOffPninetyfive\,mm. The motion models thus move Gaussians in the right places but by far too little, with one or two cameras and at either frame rate, which points to the recovery of large, fast, independent leaf motion from photometric supervision, rather than the representation of that motion, as the remaining bottleneck.
 
-\begin{table}[t]
+\begin{table}[!tbp]
 \centering\small
 \caption{30\,fps follow-up at \WindMax\,m/s: models trained on all frames (30\,fps) or every fourth frame (7.5\,fps) of the same renders; noisy sensor; mean over trees 1, 3, 5, 7 after averaging seeds (\SoNSeedsHi{} seeds at \WindMax\,m/s for one-camera static 3DGS, per-cell and oracle models; one seed otherwise, including all calm runs). Rows with two cameras add a synchronised second camera 90$^\circ$ ahead on the same orbit; test views and ground truth are those of the first camera. The wind part of CD is the calm-to-\WindMax\,m/s increase of the posed chamfer distance. A uniform shift has equal median and 95th-percentile offsets. Absolute values are not comparable to \cref{tab:dynamic} (new renders, newer rasteriser).}
 \label{tab:stage1}
 \resizebox{\linewidth}{!}{\input{generated/tab_stage1.tex}}
 \end{table}
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\IfFileExists{generated/fig_conditions_clean.pdf}{\includegraphics[width=\linewidth]{fig_conditions_clean.pdf}}{\fbox{\parbox[c][4cm][c]{0.9\linewidth}{\centering figure pending}}}
 \caption{One reconstruction per condition, clean sensor: the per-cell rigid-motion model on tree 1 (paper-1 sequences, 150 frames) in calm air and at 1.5, 3 and 5\,m/s, at one held-out instant seen from the same camera. Rows: ground-truth image, reconstructed (rendered) image, ground-truth 3D leaf surface at that instant, and the reconstructed 3D Gaussian centres near the leaves, blue within 5\,mm of a true leaf and orange off it. The images stay alike while the share of reconstructed points within 5\,mm falls from \PrecCleanCalm{} to \PrecCleanHigh\,\%.}
 \label{fig:conditions_clean}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\IfFileExists{generated/fig_conditions_noisy.pdf}{\includegraphics[width=\linewidth]{fig_conditions_noisy.pdf}}{\fbox{\parbox[c][4cm][c]{0.9\linewidth}{\centering figure pending}}}
 \caption{One reconstruction per condition, noisy sensor: the per-cell rigid-motion model on tree 1 (paper-1 sequences, 150 frames) in calm air and at 1.5, 3 and 5\,m/s, at one held-out instant seen from the same camera. Rows: ground-truth image, reconstructed (rendered) image, ground-truth 3D leaf surface at that instant, and the reconstructed 3D Gaussian centres near the leaves, blue within 5\,mm of a true leaf and orange off it. The images stay alike while the share of reconstructed points within 5\,mm falls from \PrecNoisyCalm{} to \PrecNoisyHigh\,\%.}
 \label{fig:conditions_noisy}
 \end{figure}
 
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\IfFileExists{generated/fig_recon_images.pdf}{\includegraphics[width=\linewidth]{fig_recon_images.pdf}}{\fbox{\parbox[c][4cm][c]{0.9\linewidth}{\centering figure pending: fig\_recon\_images.pdf}}}
 \caption{Held-out view of tree 1 in calm air (top) and at \WindMax\,m/s (bottom), 30\,fps, one camera: ground-truth image and the rendered reconstruction of each model at the same instant. In wind all reconstructions look plausible, which is why image metrics change little.}
 \label{fig:recon_images}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
 \centering\IfFileExists{generated/fig_recon_geometry.pdf}{\includegraphics[width=\linewidth]{fig_recon_geometry.pdf}}{\fbox{\parbox[c][4cm][c]{0.9\linewidth}{\centering figure pending: fig\_recon\_geometry.pdf}}}
 \caption{The same instant in 3D: the true leaf surface of tree 1, posed at that time and seen from the held-out camera, coloured by whether the reconstruction covers it within 5\,mm (blue) or misses it (orange); the percentage is the covered fraction of the leaf surface. In calm air most of the canopy is covered; at \WindMax\,m/s large parts of the moving leaves are missed by every model, including the oracle with ground-truth leaf groups.}
 \label{fig:recon_geometry}
@@ -285,6 +286,7 @@ The frames used above are 0.13\,s apart, and \SoAliasPctMin--\SoAliasPctMax\,\% 
 
 
 % ======================================================================
+\FloatBarrier
 \section{Discussion and limitations}\label{sec:discussion}
 All conclusions in this paper are drawn from synthetic data. The sensor-noise parameters and wind amplitudes are plausible defaults rather than values calibrated to a particular camera, plant and fan, so absolute error magnitudes may differ on real captures; the controlled comparisons (calm versus windy, clean versus noisy, method versus method), which are what the paired design measures, do not depend on these exact values. Confirming the error-versus-wind trends on real captures, using the calibration tooling of \cref{sec:calib}, is the most important next step. The generator also trades biomechanical fidelity for exactness: branch bending is piecewise rigid along skeleton segments, compound leaves move as single rigid units, leaves may interpenetrate, gusts are spatially uniform, and wind amplitudes and noise parameters are defaults (\cref{sec:calib}). Motion blur and rolling shutter, which a real hand-held capture of moving leaves would add, were disabled in all experiments; the reported wind errors are therefore likely lower bounds for real RGB capture. When enabled, they affect RGB only, and ground truth refers to the frame-centre time, as for a global-shutter depth sensor. Rendered pixels are deterministic per machine but not across GPUs, whereas geometry, poses and ground truth are bit-identical. Our conclusions concern the implementations tested: splatfacto and depth-nerfacto from Nerfstudio and our gsplat-based static, trimmed-loss and deformable 3DGS. Surface-oriented splatting such as 2DGS \citep{huang20242dgs}, other NeRF variants and RGB-D SLAM were not evaluated, and the benchmark covers four trees with one or two seeds, so per-tree effects are descriptive. Our deformable and per-part models are single, deliberately simple designs. The per-part model is a probe, not a contribution: closely related superpoint, control-point and motion-basis Gaussians exist \citep{wan2024superpoint,huang2024scgs,wang2024shape}, and dedicated dynamic methods \citep{wu20244dgs,luiten2024dynamic} were not evaluated. The 30\,fps follow-up (\cref{sec:stage1}) uses new renders and a newer software environment, so its absolute values are not directly comparable to the main benchmark; a control shows that the rasteriser version accounts for only a small part of the offset. Its calm runs and its 7.5\,fps runs use one seed. The multi-view probe used two cameras 90$^\circ$ apart on one orbit and a fixed iteration budget; rigs with more or wider-spaced cameras, longer schedules, motion blur, and motion priors or supervision that help recover large leaf motion (for example from optical flow, which SynthTree exports) are natural next steps, and the exported per-leaf transforms allow their motion to be evaluated directly.
 
