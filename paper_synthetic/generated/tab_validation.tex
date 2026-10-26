@@ -1,0 +1,14 @@
+\begin{tabular}{llr}
+\toprule
+Check (all 40 sequences) & Statistic & Value \\
+\midrule
+World position re-projects onto its own pixel centre & max error & 0.0036 px \\
+Cross-frame re-projection of exported depth (static geometry) & worst median & 0.002 px \\
+Back-projected floor lies on $z=0$ (image corners) & worst median & 3 $\mu$m \\
+\quad same test if depth were ray distance & median & 147 mm \\
+16-bit PNG depth vs.\ float EXR depth & max difference & 0.50 mm \\
+Leaf-ID pixels not in table / inconsistent with semantics & total & 0 px \\
+Per-leaf transforms predict rendered flow (leaf pixels) & worst median & 0.007 px \\
+Rendered flow of static geometry & worst median & 0.006 px \\
+\bottomrule
+\end{tabular}
