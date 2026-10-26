@@ -26,11 +26,13 @@
 
 \author[1]{Bibek Gyawali\corref{cor1}}
 \ead{TODO-institutional-email@example.org}
+\author[1]{Saurav Katwal}
+\author[1]{Sangam Parajuli}
 \cortext[cor1]{Corresponding author}
 \affiliation[1]{organization={TODO affiliation}}
 
 \begin{abstract}
-3D Gaussian splatting and neural radiance fields are now used to reconstruct plants, but they assume that nothing in the scene moves. Leaves move whenever there is wind. We built SynthTree, a generator of synthetic RGB-D videos of potted saplings in which every tree is filmed twice along the same camera path: once in still air and once in wind. Leaves are real geometry and are moved by a simple closed-form wind model, so the true position of every leaf is known in every frame; automatic checks on all \NSeqValidated{} sequences confirm that this ground truth matches the images to within \ValLeafFlowPx\,px. In \NRunsTotal{} training runs on four trees, wind at \WindMax\,m/s lowers the leaf F-score of 3D Gaussian splatting by \SpWindHiF{} and of a depth-supervised NeRF by \NfWindHiF{}, while image quality (PSNR) changes by only \RelChangePSNR\,\%: the images look right although the leaves are in the wrong place. Simulated image and depth noise matters much less than wind. Our deformable Gaussian baseline does not help, because its learned motion collapses into one small shift of the whole tree. We then asked why. The collapse remains at 30 frames per second, so the frame rate is not the cause. A per-cell rigid-motion model removes the collapse and reduces the wind part of the chamfer error by \SoClWindCDRedPct\,\%; grouping the same cells by the true leaf identities gives a further small gain, but about three quarters of that error remain, and a second synchronised camera does not help. The learned leaf motion stays far smaller than the true motion. When the same model is given the true leaf motion, the wind error disappears (F-score \SoGtFHi{} in wind against \SoGtFCalm{} in calm air), so estimating fast leaf motion from images, not representing it, is the main open problem. All results come from simulation.
+Modern 3D reconstruction methods, such as Gaussian splatting and neural radiance fields, can turn an ordinary video of a plant into a 3D model. They assume, however, that the plant stays perfectly still, and real leaves rarely do: even a light breeze makes them flutter and sway. We wanted to know how much this movement spoils the 3D models, and why methods that try to follow the movement still fail. Nobody can track every leaf of a real plant in wind, so we built SynthTree, a tool that creates computer-generated videos of small potted trees. Each tree is filmed twice along the same camera path, once in still air and once in wind, and the tool records exactly where every leaf is at every moment. This lets us compare each reconstruction with the true shape of the leaves. Wind turned out to be by far the biggest source of error, much larger than camera noise. Yet the images rendered from the models still look almost perfect, so judging a model by its pictures hides the problem: the leaves look right on screen but sit in the wrong place in 3D. A standard method for moving scenes did not help, because it learned only a tiny shift of the whole tree instead of the motion of single leaves. Letting small pieces of the tree move on their own removed this failure, but most of the error remained, and filming at a higher frame rate or adding a second camera did not change that. When we gave the same model the true leaf motion, however, the windy trees were reconstructed as well as the calm ones. The model can therefore represent moving leaves; what is missing is a way to work out how the leaves move from the video alone. All results come from simulation.
 \end{abstract}
 
 \begin{keyword}
@@ -52,7 +54,6 @@ We therefore built a synthetic benchmark in which every factor is controlled and
 \item \textbf{A benchmark} showing that wind is the main source of error, that image metrics hide most of it, and that comparing with the still (rest) pose overstates it.
 \item \textbf{A study of motion models}: a per-cell rigid-motion model removes the collapse of our deformable baseline but recovers little geometry, neither a higher frame rate nor a second camera helps, and the learned motion is far too small. Given the true leaf motion, the same model reconstructs windy leaves as well as calm ones, so estimating the motion, not representing it, is the bottleneck.
 \end{enumerate}
-Code and data are available (\cref{sec:availability}).
 
 % ======================================================================
 \section{Related work}
@@ -64,12 +65,7 @@ Code and data are available (\cref{sec:availability}).
 
 % ======================================================================
 \section{Generating trees, wind and images}\label{sec:method}
-\begin{figure}[!tbp]
-\centering\includegraphics[width=\linewidth]{architecture.png}
-\caption{Overview: SynthTree generates a tree, moves it with wind and renders it (1); calm and windy videos come with exact per-leaf ground truth (2); reconstruction methods are trained on them (3) and compared with the true leaf surface (4). Dashed: uses ground truth (oracle only).}
-\label{fig:architecture}
-\end{figure}
-\Cref{fig:architecture} gives an overview. \Cref{fig:trees} shows the \NTrees{} saplings and \cref{fig:modalities} what is saved for every frame. Everything is written in Python and NumPy except the rendering, which uses Blender. The same settings and random seed always give the same geometry, camera poses and ground truth, which we checked across two Blender versions.
+\Cref{fig:trees} shows the \NTrees{} saplings and \cref{fig:modalities} what is saved for every frame. Everything is written in Python and NumPy except the rendering, which uses Blender. The same settings and random seed always give the same geometry, camera poses and ground truth, which we checked across two Blender versions.
 
 \begin{figure}[!tbp]
 \centering\includegraphics[width=\linewidth]{fig_trees.png}
@@ -359,14 +355,11 @@ Our conclusions apply to the methods we tested: splatfacto and depth-nerfacto fr
 \section{Conclusion}
 SynthTree provides paired calm and windy RGB-D videos of plants with exact per-leaf ground truth and a way to split reconstruction error into method, noise and wind. In simulation, across four leaf types, wind is the main source of error for neural plant reconstruction; image metrics hide most of it, comparing with the rest pose overstates it, and neither our deformable baseline nor a robust loss recovers it. The deformable baseline fails because its motion collapses into a uniform shift, and this happens at 30\,fps as well, so the model, not the frame rate, is to blame. Per-cell motion removes the collapse, but even with the true leaf grouping it recovers only about a quarter of the wind error, and neither more frames nor a second camera help. The learned leaf motion stays far smaller than the true motion, and when the true motion is given, the wind error disappears. Recovering fast leaf motion from images is therefore the key problem to solve next, and the trends should be checked on real recordings.
 
-\section*{Data and code availability}\label{sec:availability}
-Code for the generator, training and evaluation (MIT licence): \url{https://github.com/bibekgyawali2/synthtree}. Per-run results of all \NRunsTotal{} benchmark runs are included as CSV files, and \texttt{scripts/paper/make\_assets.py} recreates every table, figure and number of the benchmark from them; the training scripts are under \texttt{kaggle/}. The \SoNRuns{} runs of the motion-model study are included as JSON files and \texttt{scripts/paper/make\_stage1\_assets.py} recreates their table and numbers; their renders are produced by \texttt{configs/paper2\_stage1.yaml} and \texttt{configs/paper2\_stage1\_cam2.yaml}. Dataset (\NSeq{} sequences, \DatasetGB\,GB, CC BY 4.0): \url{https://www.kaggle.com/datasets/bibekgyawali2/synthtree-v1}, available to editors and reviewers on request and to be made public with a DOI on publication; it can also be regenerated exactly from the released configuration files.
-
-\section*{CRediT authorship contribution statement}
-\textbf{Bibek Gyawali:} Conceptualization, Methodology, Software, Validation, Formal analysis, Investigation, Data curation, Visualization, Writing -- original draft, Writing -- review \& editing.
-
 \section*{Declaration of competing interest}
 The authors declare no competing interests.
+
+\section*{Declaration of generative AI and AI-assisted technologies in the writing process}
+During the preparation of this work the authors used an AI assistant (Claude, Anthropic) to help with coding and to improve the language of the manuscript. After using this tool, the authors reviewed and edited the content as needed and take full responsibility for the content of the publication.
 
 \bibliographystyle{elsarticle-harv}
 \bibliography{refs}
