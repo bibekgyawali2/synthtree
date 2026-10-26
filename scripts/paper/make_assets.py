@@ -620,6 +620,7 @@ def accounting_and_stats(bench, dyn_rows, out, N, levels, seqs):
             pairs.append((key, motion[key], a - b, (a - b) / a))
     if pairs:
         N["MotionDropList"] = "; ".join(f"tree {k}: {m:.0f}\\,mm, {d:.2f} ({rel * 100:.0f}\\,\\%)" for k, m, d, rel in pairs)
+        N["MotionDispMin"], N["MotionDispMax"] = fmt(min(m for _, m, _, _ in pairs), 0), fmt(max(m for _, m, _, _ in pairs), 0)
         from scipy.stats import spearmanr
         rho = spearmanr([m for _, m, _, _ in pairs], [d for _, _, d, _ in pairs]).correlation  # absolute F drop
         N["MotionDropRho"] = fmt(rho, 2)
