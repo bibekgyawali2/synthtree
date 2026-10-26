@@ -1,4 +1,6 @@
-"""Kaggle script kernel, stage 1 true-motion oracle: is estimating the leaf motion the bottleneck (2x T4)?
+"""Kaggle script kernel, stage 1 true-motion oracle + qualitative figure runs (2x T4).
+
+A: figure runs on tree 1 (calm, high; static, deformable, per-cell, oracle groups, true motion) with --fig.
 
 Leaf Gaussians follow the exact ground-truth leaf motion (oracle groups + --gt-motion); everything else keeps the
 learned per-cell motion. One camera and two synchronised cameras, 30 fps, trees 1/3/5/7, calm + high. If windy
@@ -19,11 +21,13 @@ WORK = "/kaggle/working"
 CODE = f"{WORK}/synthtree"
 COMMON = "--dataset synthtree-v2-stage1 --runs calm:noisy high:noisy --iters 10000 --warmup 2000"  # paper-1 schedule
 MV = "--dataset2 synthtree-v2-stage1-cam2"
-# 16 runs, ~1-1.5 h on 2x T4
-STAGES = ([f"{COMMON} --trees 1 --runs high:noisy --modes gtmotion --train-strides 1 --iters 600 --warmup 200 --eval-frames 2",
+# A 10 figure runs (deform ~30 min each), B 6 more true-motion runs (tree 1 is reused from A), C 8 two-camera
+# true-motion runs: 24 runs, ~2-2.5 h on 2x T4
+STAGES = ([f"{COMMON} --trees 1 --runs high:noisy --modes gtmotion static --train-strides 1 --iters 600 --warmup 200 --eval-frames 2 --fig",
            f"{COMMON} {MV} --trees 1 --runs high:noisy --modes gtmotion --train-strides 1 --iters 600 --warmup 200 --eval-frames 2"]
           if os.environ.get("DYN_SMOKE") == "1" else
-          [f"{COMMON} --trees 1 3 5 7 --modes gtmotion --train-strides 1",
+          [f"{COMMON} --trees 1 --modes deform static cluster oracle gtmotion --train-strides 1 --fig",
+           f"{COMMON} --trees 1 3 5 7 --modes gtmotion --train-strides 1",
            f"{COMMON} {MV} --trees 1 3 5 7 --modes gtmotion --train-strides 1"])
 
 

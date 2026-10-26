@@ -32,6 +32,7 @@ def main():
     ap.add_argument("--warmup", type=int, default=3000)
     ap.add_argument("--eval-frames", type=int, default=4)
     ap.add_argument("--dataset", default="synthtree-v1")
+    ap.add_argument("--fig", action="store_true", help="also write figure data (<run>__fig.npz) via dyngs.py --fig-out")
     ap.add_argument("--dataset2", default=None,
                     help="dataset of a synchronised second camera; its training views are added (tagged _mv)")
     ap.add_argument("--work", default="/kaggle/working")
@@ -58,7 +59,8 @@ def main():
         cmd = (f"python {HERE}/dyngs.py --seq {root}/tree_{tid:02d}/wind_{level} --tree-dir {root}/trees/tree_{tid:02d} "
                f"--variant {variant} {MODE_ARGS.get(mode, '--mode ' + mode)} --iters {a.iters} --warmup {a.warmup} --seed {seed} "
                f"--eval-frames {a.eval_frames} --train-stride {stride} --out {out}"
-               + (f" --seq2 {root2}/tree_{tid:02d}/wind_{level}" if root2 else ""))
+               + (f" --seq2 {root2}/tree_{tid:02d}/wind_{level}" if root2 else "")
+               + (f" --fig-out {os.path.join(res, name + '__fig.npz')}" if a.fig else ""))
         print(f"[run ] {name}", flush=True)
         t0 = time.time()
         with open(log, "w") as f:

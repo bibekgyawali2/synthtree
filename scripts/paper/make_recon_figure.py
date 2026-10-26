@@ -3,7 +3,8 @@
 
     python scripts/paper/make_recon_figure.py --runs data/fig_runs --out paper_synthetic/generated
 
-Reads the --fig-out .npz files written by kaggle/dyngs.py (tree 1, 30 fps, one per method and wind level) and
+Reads the figure .npz files of the Kaggle kernel stage1_gtmotion (run_dyn.py --fig; tree 1, 30 fps, one per
+method and wind level) and
 writes two figures, both seen from the held-out camera:
   fig_recon_images.pdf    ground-truth image and the rendered reconstruction of each method
   fig_recon_geometry.pdf  the true leaf surface posed at that instant, coloured by whether the reconstruction
@@ -22,8 +23,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-METHODS = [("static", "Static 3DGS"), ("deform", "Deformable 3DGS"), ("cluster", "Per-cell rigid motion"),
-           ("oracle", "Oracle groups")]
+METHODS = [("static3dgs", "Static 3DGS"), ("dyn3dgs", "Deformable 3DGS"), ("cluster3dgs", "Per-cell rigid motion"),
+           ("oracle3dgs", "Oracle groups"), ("gtmotion3dgs", "True-motion oracle")]
 LEVELS = [("calm", "Calm"), ("high", "5 m/s")]
 COVERED, MISSED = "#2a78d6", "#eb6834"  # categorical slots 1-2 of the reference palette (validated, CVD-safe)
 INK, MUTED = "#1f1f1e", "#6b6a64"
@@ -49,14 +50,14 @@ def crop_box(z, H, W, pad=24):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--runs", default=os.path.join(REPO, "data", "fig_runs"))
+    ap.add_argument("--runs", default=os.path.join(REPO, "results", "paper2_stage1_figs"))
     ap.add_argument("--tree", default="tree_01")
     ap.add_argument("--out", default=os.path.join(REPO, "paper_synthetic", "generated"))
     a = ap.parse_args()
     Z = {}
     for m, _ in METHODS:
         for lv, _ in LEVELS:
-            f = os.path.join(a.runs, f"{m}__{a.tree}__{lv}.npz")
+            f = os.path.join(a.runs, f"{m}__{a.tree}__{lv}__noisy__s0__fig.npz")  # run_dyn.py --fig naming
             if os.path.exists(f):
                 Z[(m, lv)] = np.load(f)
     if not Z:
@@ -65,7 +66,7 @@ def main():
     ncol = 1 + len(METHODS)
 
     # ---- rendered images
-    fig, axes = plt.subplots(len(LEVELS), ncol, figsize=(7.2, 3.6), squeeze=False)
+    fig, axes = plt.subplots(len(LEVELS), ncol, figsize=(7.2, 3.0), squeeze=False)
     for r, (lv, lvname) in enumerate(LEVELS):
         ref = next((Z[(m, lv)] for m, _ in METHODS if (m, lv) in Z), None)
         box = crop_box(ref, H, W) if ref is not None else (0, W, 0, H)
@@ -90,7 +91,7 @@ def main():
     plt.close(fig)
 
     # ---- geometry: true leaf surface at that instant, covered (within 5 mm) or missed
-    fig, axes = plt.subplots(len(LEVELS), ncol, figsize=(7.2, 3.9), squeeze=False)
+    fig, axes = plt.subplots(len(LEVELS), ncol, figsize=(7.2, 3.3), squeeze=False)
     for r, (lv, lvname) in enumerate(LEVELS):
         ref = next((Z[(m, lv)] for m, _ in METHODS if (m, lv) in Z), None)
         if ref is not None:
