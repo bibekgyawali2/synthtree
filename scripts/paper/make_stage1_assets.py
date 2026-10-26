@@ -22,7 +22,7 @@ import numpy as np
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TREES = ["tree_01", "tree_03", "tree_05", "tree_07"]
 LABEL = {"static3dgs": "static 3DGS", "dyn3dgs": "deformable 3DGS", "cluster3dgs": "per-cell rigid motion",
-         "oracle3dgs": "per-leaf rigid motion (oracle groups)"}
+         "oracle3dgs": "per-leaf rigid motion (oracle groups)", "gtmotion3dgs": "true leaf motion (oracle)"}
 
 
 def load(dirs):
@@ -56,7 +56,9 @@ def wind_part(runs, method, key, sign):
 
 
 def fmt(x, p=3):
-    return "--" if x is None or not np.isfinite(x) else f"{x:.{p}f}"
+    if x is None or not np.isfinite(x):
+        return "--"
+    return f"{round(x, p) + 0.0:.{p}f}"  # + 0.0 turns a rounded -0.0 into 0.0
 
 
 def main():
@@ -65,7 +67,7 @@ def main():
     a = ap.parse_args()
     res = os.path.join(REPO, "results")
     runs = load([os.path.join(res, "paper2_stage1"), os.path.join(res, "paper2_stage1_seeds"),
-                 os.path.join(res, "paper2_stage1_multiview")])
+                 os.path.join(res, "paper2_stage1_multiview"), os.path.join(res, "paper2_stage1_gtmotion")])
     p1 = load([os.path.join(res, "dynamic_v2")])
     rank = json.load(open(os.path.join(res, "paper2", "motion_rank_high.json")))["trees"]
     n_runs = sum(len(v) for v in runs.values()) + len(glob.glob(os.path.join(res, "paper2_stage1_seeds", "gsplat140", "*__geom.json")))
@@ -115,6 +117,20 @@ def main():
         M[f"So{tag}WindF"] = fmt(mean(wind_part(runs, m, "posed_fscore", -1)))
         M[f"So{tag}MvFHi"] = fmt(mean(per_tree(runs, m + "_mv", "high", "posed_fscore")))
         M[f"So{tag}MvFCalm"] = fmt(mean(per_tree(runs, m + "_mv", "calm", "posed_fscore")))
+    # true-motion oracle: leaf cells follow the exact leaf motion (one and two cameras)
+    for m, tag in (("gtmotion3dgs", "Gt"), ("gtmotion3dgs_mv", "GtMv")):
+        M[f"So{tag}FHi"] = fmt(mean(per_tree(runs, m, "high", "posed_fscore")))
+        M[f"So{tag}FCalm"] = fmt(mean(per_tree(runs, m, "calm", "posed_fscore")))
+        M[f"So{tag}CDHi"] = fmt(mean(per_tree(runs, m, "high", "posed_chamfer_mm")), 1)
+        M[f"So{tag}WindCD"] = fmt(mean(wind_part(runs, m, "posed_chamfer_mm", +1)), 1)
+        M[f"So{tag}CentroidHi"] = fmt(mean(per_tree(runs, m, "high", "posed_centroid_err_mm_median")), 1)
+        M[f"So{tag}CentroidCalm"] = fmt(mean(per_tree(runs, m, "calm", "posed_centroid_err_mm_median")), 1)
+        M[f"So{tag}PSNRHi"] = fmt(mean(per_tree(runs, m, "high", "posed_psnr")), 2)
+    gtf = per_tree(runs, "gtmotion3dgs", "high", "posed_fscore")
+    M["SoGtBeatsCalm"] = str(sum(h > c for h, c in zip(gtf, per_tree(runs, "gtmotion3dgs", "calm", "posed_fscore"))))
+    M["SoGtNeedleFHi"] = fmt(gtf[3])
+    M["SoStCentroidHi"] = fmt(mean(per_tree(runs, "static3dgs", "high", "posed_centroid_err_mm_median")), 1)
+
     # learned motion vs true motion: offsets of the motion models against the RMS leaf-centroid motion of the
     # ground truth (closed-form wind model, high wind)
     gt_rms = [rank[t]["centroid_rms_mm"] for t in TREES]
@@ -164,7 +180,9 @@ def main():
     rows = []
     specs = (("static3dgs", "30", 1), ("dyn3dgs", "30", 1), ("cluster3dgs", "30", 1),  # dyn @7.5 fps (2 trees): text only
              ("cluster3dgs_st4", "7.5", 1), ("oracle3dgs", "30", 1),
-             None, ("static3dgs_mv", "30", 2), ("cluster3dgs_mv", "30", 2), ("oracle3dgs_mv", "30", 2))
+             ("gtmotion3dgs", "30", 1),
+             None, ("static3dgs_mv", "30", 2), ("cluster3dgs_mv", "30", 2), ("oracle3dgs_mv", "30", 2),
+             ("gtmotion3dgs_mv", "30", 2))
     for spec in specs:
         if spec is None:
             rows.append("\\midrule")
