@@ -12,3 +12,6 @@ web/manifest.json
 
 # local secrets (Kaggle token etc.)
 .env
+
+# per-run figure data (large; kept locally and in the Kaggle outputs)
+results/**/*__fig.npz
