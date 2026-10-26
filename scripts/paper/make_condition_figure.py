@@ -59,45 +59,60 @@ def main():
     x0, y0 = np.maximum(uv_all.min(0) - 20, 0).astype(int)
     x1, y1 = np.minimum(uv_all.max(0) + 20, [W, H]).astype(int)
 
-    rows = [(v, vname, kind) for v, vname in VARIANTS for kind in ("render", "geometry")]
-    fig, axes = plt.subplots(len(rows), len(WINDS), figsize=(7.2, 7.6), squeeze=False)
-    for r, (v, vname, kind) in enumerate(rows):
-        for c, (w, wname) in enumerate(WINDS):
-            ax = axes[r, c]
-            ax.set_xticks([]), ax.set_yticks([])
-            z = Z.get((v, w))
-            if z is None:
-                ax.text(0.5, 0.5, "not run", ha="center", va="center", color=MUTED, transform=ax.transAxes)
-            elif kind == "render":
-                ax.imshow(z["img_render"][y0:y1, x0:x1])
-            else:
-                ax.set_facecolor("#fcfcfb")
-                uv, depth = project(z["P_gt"].astype(np.float64), z["viewmat"], z["K"])
-                o = np.argsort(-depth)
-                cov = z["d_gt"][o] < TAU
-                ax.scatter(uv[o, 0], uv[o, 1], s=0.12, c=np.where(cov, COVERED, MISSED), linewidths=0, rasterized=True)
-                ax.set_xlim(x0, x1), ax.set_ylim(y1, y0), ax.set_aspect("equal")
-                ax.text(0.03, 0.03, f"covered {100 * cov.mean():.0f}%", transform=ax.transAxes, color=INK,
-                        fontsize=7, va="bottom")
-            if r == 0:
-                ax.set_title(wname)
-            if c == 0:
-                ax.set_ylabel(f"{vname}\n{'rendered view' if kind == 'render' else 'leaf surface'}")
-    handles = [Line2D([], [], marker="o", ls="", color=COVERED, label="true leaf surface within 5 mm of the reconstruction"),
-               Line2D([], [], marker="o", ls="", color=MISSED, label="missed")]
-    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, fontsize=7.5)
-    fig.tight_layout(rect=(0, 0.04, 1, 1), pad=0.4, w_pad=0.3, h_pad=0.4)
-    os.makedirs(a.out, exist_ok=True)
-    fig.savefig(os.path.join(a.out, "fig_conditions.pdf"), dpi=300)
-    fig.savefig(os.path.join(a.out, "fig_conditions.png"), dpi=200)
-    plt.close(fig)
+    # one figure per sensor variant: ground-truth image, reconstructed image, ground-truth 3D leaves, reconstructed 3D
+    rows = [("img_gt", "ground-truth\nimage"), ("img_render", "reconstructed\nimage"),
+            ("gt3d", "ground-truth\n3D leaves"), ("rec3d", "reconstructed\n3D")]
+    for v, vname in VARIANTS:
+        fig, axes = plt.subplots(len(rows), len(WINDS), figsize=(7.2, 7.4), squeeze=False)
+        for r, (kind, rname) in enumerate(rows):
+            for c, (w, wname) in enumerate(WINDS):
+                ax = axes[r, c]
+                ax.set_xticks([]), ax.set_yticks([])
+                z = Z.get((v, w))
+                if z is None:
+                    ax.text(0.5, 0.5, "not run", ha="center", va="center", color=MUTED, transform=ax.transAxes)
+                elif kind in ("img_gt", "img_render"):
+                    ax.imshow(z[kind][y0:y1, x0:x1])
+                else:
+                    ax.set_facecolor("#fcfcfb")
+                    if kind == "gt3d":
+                        P, col, txt = z["P_gt"].astype(np.float64), INK, None
+                    else:  # Gaussian centres near the true leaves, coloured by their distance to the true surface
+                        near = z["d_rec"] < 0.03
+                        P = z["mu"][near].astype(np.float64)
+                        ok = z["d_rec"][near] < TAU
+                        col, txt = ok, f"within 5 mm: {100 * ok.mean():.0f}%"
+                    uv, depth = project(P, z["viewmat"], z["K"])
+                    o = np.argsort(-depth)
+                    c_ = col if isinstance(col, str) else np.where(col[o], COVERED, MISSED)
+                    ax.scatter(uv[o, 0], uv[o, 1], s=0.12 if kind == "gt3d" else 0.5, c=c_, linewidths=0, rasterized=True)
+                    ax.set_xlim(x0, x1), ax.set_ylim(y1, y0), ax.set_aspect("equal")
+                    if txt:
+                        ax.text(0.03, 0.03, txt, transform=ax.transAxes, color=INK, fontsize=7, va="bottom")
+                if r == 0:
+                    ax.set_title(wname)
+                if c == 0:
+                    ax.set_ylabel(rname)
+        handles = [Line2D([], [], marker="o", ls="", color=INK, label="true leaf surface"),
+                   Line2D([], [], marker="o", ls="", color=COVERED, label="reconstruction within 5 mm of a true leaf"),
+                   Line2D([], [], marker="o", ls="", color=MISSED, label="reconstruction off the true leaves")]
+        fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, fontsize=7.5)
+        fig.suptitle(f"Per-cell rigid motion, tree 1, {vname}", fontsize=9, color=INK)
+        fig.tight_layout(rect=(0, 0.035, 1, 0.98), pad=0.4, w_pad=0.3, h_pad=0.4)
+        os.makedirs(a.out, exist_ok=True)
+        fig.savefig(os.path.join(a.out, f"fig_conditions_{v}.pdf"), dpi=300)
+        fig.savefig(os.path.join(a.out, f"fig_conditions_{v}.png"), dpi=200)
+        plt.close(fig)
+
     # covered fractions for the caption (every number in the paper is generated)
     names = {"calm": "Calm", "low": "Low", "medium": "Medium", "high": "High"}
     with open(os.path.join(a.out, "numbers_conditions.tex"), "w") as f:
         f.write("% generated by scripts/paper/make_condition_figure.py - do not edit\n")
         for (v, w), z in sorted(Z.items()):
             f.write(f"\\newcommand{{\\Cov{v.capitalize()}{names[w]}}}{{{100 * (z['d_gt'] < TAU).mean():.0f}}}\n")
-    print(f"{len(Z)} conditions -> fig_conditions.pdf / .png, numbers_conditions.tex in {a.out}")
+            near = z["d_rec"] < 0.03
+            f.write(f"\\newcommand{{\\Prec{v.capitalize()}{names[w]}}}{{{100 * (z['d_rec'][near] < TAU).mean():.0f}}}\n")
+    print(f"{len(Z)} conditions -> fig_conditions_clean/noisy.pdf/.png, numbers_conditions.tex in {a.out}")
 
 
 if __name__ == "__main__":
