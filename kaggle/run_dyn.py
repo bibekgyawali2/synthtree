@@ -13,9 +13,10 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-NAMES = {"static": "static3dgs", "deform": "dyn3dgs", "robust": "robust3dgs", "cluster": "cluster3dgs", "oracle": "oracle3dgs"}
+NAMES = {"static": "static3dgs", "deform": "dyn3dgs", "robust": "robust3dgs", "cluster": "cluster3dgs", "oracle": "oracle3dgs", "gtmotion": "gtmotion3dgs"}
 # "oracle" = cluster mode with one motion cell per GT leaf (upper bound for the grouping)
-MODE_ARGS = {"oracle": "--mode cluster --grouping oracle"}
+MODE_ARGS = {"oracle": "--mode cluster --grouping oracle",
+             "gtmotion": "--mode cluster --grouping oracle --gt-motion"}  # exact leaf motion: upper bound
 
 
 def main():

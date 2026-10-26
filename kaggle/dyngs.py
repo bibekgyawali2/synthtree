@@ -89,6 +89,9 @@ def main():
                     help="phase of the stride; 2 keeps 7.5 fps frames off the every-8th-frame test views")
     ap.add_argument("--leaf-clusters", type=int, default=2048, help="cluster mode: fine (leaf-scale) cells")
     ap.add_argument("--branch-clusters", type=int, default=32, help="cluster mode: coarse (branch-scale) cells")
+    ap.add_argument("--gt-motion", action="store_true",
+                    help="with --grouping oracle: leaf cells follow the exact ground-truth leaf motion instead of a "
+                         "learned one (upper bound for motion estimation); other cells keep their learned motion")
     ap.add_argument("--grouping", default="kmeans", choices=["kmeans", "oracle"],
                     help="cluster mode: leaf cells from k-means, or one cell per GT leaf (upper bound for grouping)")
     ap.add_argument("--f-max", type=float, default=10.0, help="cluster mode: highest motion frequency, Hz")
@@ -99,6 +102,9 @@ def main():
                     help="cluster mode: Adam lr of the Fourier coefficients; Adam moves all ~2J coefficients by ~lr "
                          "per step and they add coherently at a given time, so this must be ~1e-3 / (2J)")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--fig-out", default=None,
+                    help="also save figure data for the middle evaluated held-out frame (renders, Gaussian centres "
+                         "at that time, posed ground-truth leaf surface and nearest distances) to this .npz")
     a = ap.parse_args()
 
     import torch
@@ -107,7 +113,7 @@ def main():
     from gsplat.strategy import DefaultStrategy
 
     from convert import init_point_cloud
-    from eval_geometry import evaluate, hybrid_metrics, sample_gaussians
+    from eval_geometry import evaluate, hybrid_metrics, sample_gaussians, sample_mesh
     from synthtree_dataset import SynthTreeSequence
     from synthtree.tree import load_tree
 
@@ -289,6 +295,16 @@ def main():
         np.add.at(cen, vl, P)
         cen /= np.maximum(np.bincount(vl, minlength=L), 1)[:, None]
         oracle.update(P=torch.tensor(P, device=dev, dtype=torch.float32), vl=torch.tensor(vl, device=dev), L=L)
+        if a.gt_motion:
+            # time-average leaf points are y = A x0 + tt (positions average linearly), so the exact map to frame f is
+            # x_f = A_f A^-1 (y - tt) + b_f (affine; checked to 1e-12 mm); orientations use its nearest rotation
+            Rrel = np.einsum("flij,ljk->flik", z[..., :3], np.linalg.inv(A))
+            trel = z[..., 3] - np.einsum("flij,lj->fli", Rrel, tt)
+            U, _, Vt = np.linalg.svd(Rrel)
+            oracle.update(Rrot=torch.tensor(U @ Vt, device=dev, dtype=torch.float32),
+                          Rrel=torch.tensor(Rrel, device=dev, dtype=torch.float32),
+                          trel=torch.tensor(trel, device=dev, dtype=torch.float32),
+                          times=torch.tensor(te.times, device=dev, dtype=torch.float32))
         d, _ = nearest_d(x, oracle["P"])
         other = x[d >= 0.01]
         oracle["c_other"] = kmeans(other, min(256, len(other)))
@@ -309,8 +325,16 @@ def main():
             Rb, tb = motion.se3(motion.coef_b, motion.pb, bas)
             Rl, tl = motion.se3(motion.coef_l, motion.pl, bas)
             bid, lid = cells["bid"], cells["lid"]
-            m = torch.einsum("nij,nj->ni", Rb[bid], torch.einsum("nij,nj->ni", Rl[lid], m) + tl[lid]) + tb[bid]
-            q = quat_mul(rotmat_to_quat(Rb[bid] @ Rl[lid]), F.normalize(q, dim=-1))
+            m0, q0 = m, F.normalize(q, dim=-1)
+            m = torch.einsum("nij,nj->ni", Rb[bid], torch.einsum("nij,nj->ni", Rl[lid], m0) + tl[lid]) + tb[bid]
+            q = quat_mul(rotmat_to_quat(Rb[bid] @ Rl[lid]), q0)
+            if "Rrel" in oracle:  # leaf Gaussians follow the exact leaf motion at this frame
+                f = int(torch.argmin((oracle["times"] - t * tmax).abs()))
+                leaf = lid < oracle["L"]
+                li = lid.clamp(max=oracle["L"] - 1)
+                Rg, tg = oracle["Rrel"][f][li], oracle["trel"][f][li]
+                m = torch.where(leaf[:, None], torch.einsum("nij,nj->ni", Rg, m0) + tg, m)
+                q = torch.where(leaf[:, None], quat_mul(rotmat_to_quat(oracle["Rrot"][f][li]), q0), q)
         return m, F.normalize(q, dim=-1), torch.exp(s), torch.sigmoid(params["opacities"]), torch.sigmoid(params["colors"])
 
     def render(t, vm, use_deform):
@@ -406,6 +430,28 @@ def main():
         if isinstance(posed[0][key], (int, float)) and all(p.get(key) is not None for p in posed):
             out["posed_" + key] = float(np.mean([p[key] for p in posed]))
     out["posed_psnr"] = psnr(has_motion)
+    if a.fig_out:  # one held-out instant for the qualitative figure (scripts/paper/make_recon_figure.py)
+        from scipy.spatial import cKDTree
+        j = int(sel[len(sel) // 2])
+        T = te.leaf["T"][te_idx[j]].astype(np.float64)
+        with torch.no_grad():
+            img, _ = render(te_t[j], te_vm[j], has_motion)
+            m, q, s_, o, c = gaussians_at(te_t[j], has_motion)
+        m, q, s_, o, c = (x.detach() for x in (m, q, s_, o, c))  # static mode returns the parameters themselves
+        keep = (o >= 0.1).cpu().numpy()
+        mu = m.cpu().numpy()[keep].astype(np.float64)
+        lv, lf, vl = tree["leaf_verts"], tree["leaf_faces"], tree["leaf_vert_leaf"]
+        posed = np.einsum("vij,vj->vi", T[vl, :, :3], lv) + T[vl, :, 3]
+        P_gt, _, _, _ = sample_mesh(posed, lf, 200_000, np.random.default_rng(1))
+        d_rec = cKDTree(P_gt).query(mu)[0]       # each Gaussian centre -> nearest true leaf surface (precision)
+        Qn, Sn, On = (x.cpu().numpy()[keep].astype(np.float64) for x in (q, s_, o))
+        Ps, _ = sample_gaussians(mu, quat_to_rotmat_np(Qn), Sn, On, 600_000, np.random.default_rng(2))
+        d_gt = cKDTree(Ps).query(P_gt)[0]        # each true leaf point -> nearest footprint sample (coverage), as in the metrics
+        np.savez_compressed(a.fig_out, img_render=(img.cpu().numpy() * 255).astype(np.uint8),
+                            img_gt=(te_img[j].cpu().numpy() * 255).astype(np.uint8), viewmat=te_vm[j].cpu().numpy(),
+                            K=K.cpu().numpy(), mu=mu.astype(np.float32), rgb=c.cpu().numpy()[keep].astype(np.float32),
+                            d_rec=d_rec.astype(np.float32), P_gt=P_gt.astype(np.float32), d_gt=d_gt.astype(np.float32),
+                            frame=te_idx[j], mode=a.mode, grouping=a.grouping)
     if has_motion:  # diagnostic: how far does the learned deformation move Gaussians?
         with torch.no_grad():
             mags = torch.cat([(gaussians_at(te_t[j], True)[0] - params["means"]).norm(dim=-1) for j in sel])
@@ -413,7 +459,7 @@ def main():
         out["deform_offset_mm_p95"] = float(torch.quantile(mags[torch.randperm(len(mags))[:100000]], 0.95)) * 1000
     if motion is not None:
         out.update({"leaf_clusters": len(motion.c_leaf), "branch_clusters": len(motion.c_branch), "f_max": a.f_max,
-                    "grouping": a.grouping})
+                    "grouping": a.grouping, "gt_motion": bool(a.gt_motion)})
     out.update({"mode": a.mode, "variant": a.variant, "iters": a.iters, "n_gaussians": int(len(params["means"])),
                 "train_stride": a.train_stride, "n_train_views": len(tr_img), "n_cameras": 2 if a.seq2 else 1,
                 "seconds": round(time.time() - t_start, 1)})

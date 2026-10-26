@@ -64,7 +64,8 @@ def main():
     ap.add_argument("--out", default=os.path.join(REPO, "paper_synthetic", "generated"))
     a = ap.parse_args()
     res = os.path.join(REPO, "results")
-    runs = load([os.path.join(res, "paper2_stage1"), os.path.join(res, "paper2_stage1_seeds")])
+    runs = load([os.path.join(res, "paper2_stage1"), os.path.join(res, "paper2_stage1_seeds"),
+                 os.path.join(res, "paper2_stage1_multiview")])
     p1 = load([os.path.join(res, "dynamic_v2")])
     rank = json.load(open(os.path.join(res, "paper2", "motion_rank_high.json")))["trees"]
     n_runs = sum(len(v) for v in runs.values()) + len(glob.glob(os.path.join(res, "paper2_stage1_seeds", "gsplat140", "*__geom.json")))
@@ -107,6 +108,20 @@ def main():
     M["SoStFCalm"], M["SoClFCalm"] = fmt(mean(calm_s)), fmt(mean(calm_c))
     M["SoOrFCalm"] = fmt(mean(per_tree(runs, "oracle3dgs", "calm", "posed_fscore")))
 
+    # multi-view probe: the same models with a synchronised second camera (orbit +90 deg), suffix _mv
+    for m, tag in (("static3dgs", "St"), ("cluster3dgs", "Cl"), ("oracle3dgs", "Or")):
+        M[f"So{tag}MvWindCD"] = fmt(mean(wind_part(runs, m + "_mv", "posed_chamfer_mm", +1)), 1)
+        M[f"So{tag}MvWindF"] = fmt(mean(wind_part(runs, m + "_mv", "posed_fscore", -1)))
+        M[f"So{tag}WindF"] = fmt(mean(wind_part(runs, m, "posed_fscore", -1)))
+        M[f"So{tag}MvFHi"] = fmt(mean(per_tree(runs, m + "_mv", "high", "posed_fscore")))
+        M[f"So{tag}MvFCalm"] = fmt(mean(per_tree(runs, m + "_mv", "calm", "posed_fscore")))
+    # learned motion vs true motion: offsets of the motion models against the RMS leaf-centroid motion of the
+    # ground truth (closed-form wind model, high wind)
+    gt_rms = [rank[t]["centroid_rms_mm"] for t in TREES]
+    M["SoGtMotionRmsMin"], M["SoGtMotionRmsMax"] = fmt(min(gt_rms), 0), fmt(max(gt_rms), 0)
+    M["SoOrOffMed"] = fmt(mean(per_tree(runs, "oracle3dgs", "high", "deform_offset_mm_median")), 1)
+    M["SoOrOffPninetyfive"] = fmt(mean(per_tree(runs, "oracle3dgs", "high", "deform_offset_mm_p95")), 1)
+
     # temporal sampling: the same per-cell model at 7.5 fps (every 4th frame of the same renders)
     M["SoClFHiSlow"], M["SoClCDHiSlow"] = fmt(F["cluster3dgs_st4"]), fmt(CD["cluster3dgs_st4"], 1)
 
@@ -147,9 +162,15 @@ def main():
             f.write(f"\\newcommand{{\\{k}}}{{{M[k]}}}\n")
 
     rows = []
-    for m, rate in (("static3dgs", "30"), ("dyn3dgs", "30"), ("cluster3dgs", "30"),  # dyn @7.5 fps (2 trees): text only
-                    ("cluster3dgs_st4", "7.5"), ("oracle3dgs", "30")):
-        base = m.replace("_st4", "")
+    specs = (("static3dgs", "30", 1), ("dyn3dgs", "30", 1), ("cluster3dgs", "30", 1),  # dyn @7.5 fps (2 trees): text only
+             ("cluster3dgs_st4", "7.5", 1), ("oracle3dgs", "30", 1),
+             None, ("static3dgs_mv", "30", 2), ("cluster3dgs_mv", "30", 2), ("oracle3dgs_mv", "30", 2))
+    for spec in specs:
+        if spec is None:
+            rows.append("\\midrule")
+            continue
+        m, rate, cams = spec
+        base = m.replace("_st4", "").replace("_mv", "")
         n = sum(1 for t in TREES if runs.get((m, t, "high")))
         cells = [mean(per_tree(runs, m, "high", k)) for k in
                  ("posed_fscore", "posed_chamfer_mm", "posed_centroid_err_mm_median", "posed_psnr")]
@@ -157,12 +178,12 @@ def main():
         med = mean(per_tree(runs, m, "high", "deform_offset_mm_median"))
         p95 = mean(per_tree(runs, m, "high", "deform_offset_mm_p95"))
         off = "--" if not np.isfinite(med) else f"{med:.1f} / {p95:.1f}"
-        rows.append(f"{LABEL[base]} & {rate} & {n} & {fmt(cells[0])} & {fmt(cells[1], 1)} & {fmt(wcd, 1)} & "
+        rows.append(f"{LABEL[base]} & {rate} & {cams} & {n} & {fmt(cells[0])} & {fmt(cells[1], 1)} & {fmt(wcd, 1)} & "
                     f"{fmt(cells[2], 1)} & {fmt(cells[3], 2)} & {off} \\\\")
     with open(os.path.join(a.out, "tab_stage1.tex"), "w") as f:
-        f.write("\\begin{tabular}{lrrrrrrrr}\n\\toprule\n"
-                "Method & fps & Trees & F (posed) & CD posed [mm] & Wind part of CD [mm] & Centroid posed [mm] & "
-                "PSNR [dB] & Offset med / p95 [mm] \\\\\n\\midrule\n")
+        f.write("\\begin{tabular}{lrrrrrrrrr}\n\\toprule\n"
+                "Method & fps & Cameras & Trees & F (posed) & CD posed [mm] & Wind part of CD [mm] & "
+                "Centroid posed [mm] & PSNR [dB] & Offset med / p95 [mm] \\\\\n\\midrule\n")
         f.write("\n".join(rows) + "\n\\bottomrule\n\\end{tabular}\n")
     print(f"{n_runs} stage-1 runs; wrote numbers_stage1.tex ({len(M)} macros) and tab_stage1.tex to {a.out}")
 
