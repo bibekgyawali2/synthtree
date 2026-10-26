@@ -25,11 +25,16 @@
 \title{Leaf motion limits 3D reconstruction of plants in wind: a synthetic benchmark and a study of per-part rigid-motion models}
 
 \author[1]{Bibek Gyawali\corref{cor1}}
-\ead{TODO-institutional-email@example.org}
-\author[1]{Saurav Katwal}
-\author[1]{Sangam Parajuli}
+\ead{gyawali.b@outlook.com}
+\author[2]{Saurav Katwal}
+\author[2]{Sangam Parajuli}
 \cortext[cor1]{Corresponding author}
-\affiliation[1]{organization={TODO affiliation}}
+\affiliation[1]{organization={Himalaya College of Engineering},
+            city={Lalitpur},
+            country={Nepal}}
+\affiliation[2]{organization={IOE Thapathali},
+            city={Kathmandu},
+            country={Nepal}}
 
 \begin{abstract}
 Modern 3D reconstruction methods, such as Gaussian splatting and neural radiance fields, can turn an ordinary video of a plant into a 3D model. They assume, however, that the plant stays perfectly still, and real leaves rarely do: even a light breeze makes them flutter and sway. We wanted to know how much this movement spoils the 3D models, and why methods that try to follow the movement still fail. Nobody can track every leaf of a real plant in wind, so we built SynthTree, a tool that creates computer-generated videos of small potted trees. Each tree is filmed twice along the same camera path, once in still air and once in wind, and the tool records exactly where every leaf is at every moment. This lets us compare each reconstruction with the true shape of the leaves. Wind turned out to be by far the biggest source of error, much larger than camera noise. Yet the images rendered from the models still look almost perfect, so judging a model by its pictures hides the problem: the leaves look right on screen but sit in the wrong place in 3D. A standard method for moving scenes did not help, because it learned only a tiny shift of the whole tree instead of the motion of single leaves. Letting small pieces of the tree move on their own removed this failure, but most of the error remained, and filming at a higher frame rate or adding a second camera did not change that. When we gave the same model the true leaf motion, however, the windy trees were reconstructed as well as the calm ones. The model can therefore represent moving leaves; what is missing is a way to work out how the leaves move from the video alone. All results come from simulation.
