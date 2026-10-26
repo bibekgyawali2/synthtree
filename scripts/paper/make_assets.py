@@ -52,6 +52,10 @@ class Numbers:
                 f.write(f"\\newcommand{{\\{k}}}{{{v}}}\n")
 
 
+# row/column wording; --plain-labels gives the wording of the simulation-only paper (paper_synthetic)
+LABELS = {"sensor": "Sensor", "variant": "per sensor variant"}
+
+
 def fmt(x, p=1):
     return f"{x:.{p}f}"
 
@@ -334,7 +338,7 @@ def results_assets(rows, levels, out, N):
     with open(os.path.join(out, "tab_decomp.tex"), "w") as f:
         f.write("\\begin{tabular}{llrrr}\n\\toprule\nMethod & Component & F@5mm drop & CD increase [mm] & Centroid increase [mm] \\\\\n\\midrule\n")
         for m in methods:
-            comps = [("method", "0", "Occlusion/method$^{\\dagger}$")] + [("sensor", "0", "Sensor")] + \
+            comps = [("method", "0", "Occlusion/method$^{\\dagger}$")] + [("sensor", "0", LABELS["sensor"])] + \
                     [("wind", f"{u:g}", f"Wind, $U={u:g}$ m/s") for u in sorted(set(levels.values())) if u > 0] + \
                     [("interaction", f"{hi:g}", f"Interaction, $U={hi:g}$")]
             for i, (c, u, lab) in enumerate(comps):
@@ -551,7 +555,7 @@ def accounting_and_stats(bench, dyn_rows, out, N, levels, seqs):
             "dyn3dgs": "deformable 3DGS (10-band)"}
     total = 0
     with open(os.path.join(out, "tab_runs.tex"), "w") as f:
-        f.write("\\begin{tabular}{llllrr}\n\\toprule\nStudy & Method & Trees & Wind $U$ [m/s] per sensor variant & Seeds & Runs \\\\\n\\midrule\n")
+        f.write("\\begin{tabular}{llllrr}\n\\toprule\nStudy & Method & Trees & Wind $U$ [m/s] " + LABELS["variant"] + " & Seeds & Runs \\\\\n\\midrule\n")
         for (study, m), rs in sorted(groups.items()):
             trees = sorted({int(r["tree"]) for r in rs})
             conds = sorted({(r["wind_U"], r["sensor"]) for r in rs})
@@ -621,7 +625,11 @@ def main():
     ap.add_argument("--master", default=os.path.join(REPO, "configs", "master.yaml"))
     ap.add_argument("--results", nargs="*", default=[])
     ap.add_argument("--out", default=os.path.join(REPO, "paper", "generated"))
+    ap.add_argument("--plain-labels", action="store_true",
+                    help="'Noise' instead of 'Sensor' and 'per input (clean / noisy)' (paper_synthetic wording)")
     a = ap.parse_args()
+    if a.plain_labels:
+        LABELS.update(sensor="Noise", variant="per input (clean / noisy)")
     os.makedirs(a.out, exist_ok=True)
     m = load_master(a.master)
     seqs = [s for s in expand_master(m) if os.path.exists(os.path.join(s["out_dir"], "metadata.json"))]
